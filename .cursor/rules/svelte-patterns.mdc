@@ -1,0 +1,113 @@
+---
+description: Svelte 5 component patterns and Podman Desktop UI integration with RHDH Local specific examples
+globs: ["**/*.svelte", "**/frontend/**"]
+alwaysApply: false
+---
+
+# Svelte Component Patterns
+
+## Svelte 5 Reactive State for RHDH Local
+Use modern Svelte 5 reactive patterns for RHDH management:
+
+```svelte
+<script lang="ts">
+// Reactive state declarations
+let status = $state<RHDHStatus | null>(null);
+let logs = $state<RHDHLogs | null>(null);
+let isLoading = $state(false);
+let selectedService = $state('rhdh');
+
+// Derived values
+let isRunning = $derived(status?.isRunning ?? false);
+let statusColor = $derived(isRunning ? 'text-green-500' : 'text-red-500');
+
+// Event handlers
+async function loadStatus(): Promise<void>;
+function onMount(): () => void;
+</script>
+```
+
+## RHDH Setup Flow UI Pattern
+Handle repository cloning with user choice:
+
+```svelte
+<script lang="ts">
+// Setup state
+let useCustomPath = $state(false);
+let customPath = $state('');
+
+// Setup actions
+async function cloneRepository(): Promise<void>;
+</script>
+
+<!-- UI Components: EmptyScreen, Button, Input, radio inputs -->
+```
+
+## Service Management UI Pattern
+Use Podman Desktop UI components for service control:
+
+```svelte
+<script lang="ts">
+// Service management actions
+async function startRHDH(): Promise<void>;
+async function stopRHDH(): Promise<void>;
+async function restartRHDH(): Promise<void>;
+async function installPlugins(): Promise<void>;
+</script>
+
+<!-- UI Components: Card, Button with icons (faPlay, faStop, faRefresh, faDownload) -->
+```
+
+## Configuration Management UI Pattern
+Handle RHDH configuration files:
+
+```svelte
+<script lang="ts">
+// Configuration file types
+type ConfigType = 'app-config' | 'dynamic-plugins' | 'env';
+
+// Configuration actions
+function openConfigFile(configType: ConfigType): Promise<void>;
+</script>
+
+<!-- UI Components: Card, Button with faFileAlt icon -->
+```
+
+## Service Status Display Pattern
+Show real-time service status with proper styling:
+
+```svelte
+<script lang="ts">
+// Service status actions
+async function loadLogs(serviceName: string): Promise<void>;
+</script>
+
+<!-- UI Components: Card, Button, grid layout with service status indicators -->
+```
+
+## Logs Display Pattern
+Show service logs with proper formatting:
+
+```svelte
+<!-- UI Components: Card with formatted log display (terminal-style) -->
+```
+
+## Empty State Pattern
+Handle non-running states with clear actions:
+
+```svelte
+<!-- UI Components: EmptyScreen, Button with faPlay icon -->
+```
+
+## Component Organization Standards
+- Use TypeScript in all script blocks: `<script lang="ts">`
+- Import types from shared package: `import type { RHDHStatus } from '/@shared/src/RHDHLocalApi'`
+- Use proper component cleanup in `onDestroy` for intervals/subscriptions
+- Leverage Podman Desktop's theming with CSS custom properties
+- Follow responsive design patterns with TailwindCSS
+- Use semantic HTML and proper accessibility attributes
+- Handle loading states consistently across all operations
+- Show clear error states and recovery actions
+- Provide informative empty states with actionable next steps
+- Use consistent icon usage from FontAwesome free-solid-svg-icons
+- Maintain proper component focus and single responsibility principle

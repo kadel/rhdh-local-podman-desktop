@@ -1,0 +1,131 @@
+---
+description: Core context for RHDH Local Podman Desktop Extension - always applied with complete implementation context
+globs: ["**"]
+alwaysApply: true
+---
+
+# RHDH Local Podman Desktop Extension - Core Context
+
+## Project Overview
+This is a Podman Desktop Extension for managing Red Hat Developer Hub Local (rhdh-local) instances. The extension manages the rhdh-local git repository and provides a user-friendly interface for starting, stopping, restarting, and configuring rhdh-local deployments using Podman/Docker Compose.
+
+Podman Desktop is an Electron based application.
+
+**RHDH Local Repository**: https://github.com/redhat-developer/rhdh-local
+**Reference Documentation**: [RHDH Local Usage](https://github.com/redhat-developer/rhdh-local?tab=readme-ov-file#usage)
+**Podman Desktop API Documentation**: [Podman Desktop API](https://podman-desktop.io/api)
+
+## Architecture
+```
+monorepo/
+├── packages/backend/     # Extension backend (Node.js/TypeScript)
+├── packages/frontend/    # UI (Svelte 5/TypeScript/TailwindCSS) 
+├── packages/shared/      # Shared APIs and types
+└── root package.json     # Workspace configuration
+```
+
+## Core Technology Stack
+- **Backend**: TypeScript, Node.js, Podman Desktop API
+- **Frontend**: Svelte 5, TypeScript, TailwindCSS, @podman-desktop/ui-svelte
+- **Build**: Vite, Vitest for testing
+- **Communication**: RPC-based message passing via MessageProxy
+- **Process Execution**: `podmanDesktopApi.process.exec` for `podman-compose` commands
+- **Storage**: `extensionContext.storagePath` for repository and configuration storage
+
+## RHDH Local Workflow Understanding
+RHDH Local is a git repository containing:
+- `compose.yaml` - Podman compose configuration
+- `configs/app-config/app-config.local.yaml` - Main RHDH configuration file
+- `configs/dynamic-plugins/dynamic-plugins.override.yaml` -Dynamic Plugins configuration
+- `.env` - Environment variables (created from `env.sample`)
+- `configs/catalog-entities/users.override.yaml` - Catalog entities (Users) configuration
+- `configs/catalog-entities/components.override.yaml` - Catalog entities configuration
+
+### Essential Workflow:
+1. **Setup**: `git clone https://github.com/redhat-developer/rhdh-local.git && cp env.sample .env`
+2. **Start**: `podman-compose up -d`
+3. **Access**: `http://localhost:7007`
+4. **Config Changes**: 
+   - `app-config.local.yaml` → restart rhdh service
+   - `dynamic-plugins.override.yaml` → run install-dynamic-plugins + restart rhdh
+   - `users.override.yaml` or `components.override.yaml` → restart rhdh
+5. **Stop**: `podman-compose down`
+
+## Extension Storage Pattern
+Always use `extensionContext.storagePath` for data storage:
+
+```typescript
+export class RHDHLocalApiImpl implements RHDHLocalApi {
+  private defaultConfig: RHDHConfig;
+  
+  constructor(private readonly extensionContext: podmanDesktopApi.ExtensionContext);
+  async getConfiguration(): Promise<RHDHConfig>;
+}
+```
+
+## API Design Patterns
+
+### RHDH Local API Definition
+Follow the HelloWorldApi pattern with comprehensive RHDH Local functionality:
+
+```typescript
+// packages/shared/src/RHDHLocalApi.ts
+export interface RHDHStatus {
+  isRunning: boolean;
+  isInstalled: boolean; // Whether rhdh-local repo exists
+  services: {
+    rhdh: { status: 'running' | 'stopped' | 'error' };
+    'install-dynamic-plugins': { status: 'running' | 'stopped' | 'error' };
+  };
+  url?: string; // http://localhost:7007 when running
+  repoPath?: string; // Path to cloned rhdh-local repo
+  lastUpdated: Date;
+}
+
+export abstract class RHDHLocalApi {
+  // Installation and setup
+  abstract checkInstallation(): Promise<{ installed: boolean; path?: string }>;
+  abstract cloneRepository(targetPath?: string): Promise<void>;
+  abstract updateRepository(): Promise<void>; // git pull
+  
+  // Lifecycle management
+  abstract getStatus(): Promise<RHDHStatus>;
+  abstract start(): Promise<void>; // podman-compose up -d
+  abstract stop(): Promise<void>; // podman-compose down  
+  abstract restart(): Promise<void>; // stop + start
+  
+  // Service management
+  abstract installPlugins(): Promise<void>; // run install-dynamic-plugins
+  abstract getLogs(service: string, lines?: number): Promise<RHDHLogs>;
+  
+  // Configuration
+  abstract getConfiguration(configType: 'app-config' | 'dynamic-plugins' | 'env'): Promise<string>;
+  abstract updateConfiguration(configType: 'app-config' | 'dynamic-plugins' | 'env', config: string): Promise<void>;
+  
+  // Utilities  
+  abstract openRHDHInBrowser(): Promise<void>;
+}
+```
+
+### Implementation hints
+- use `extensionContext.storagePath` for storing rhdh-local repository clone and configuration
+- use `podmanDesktopApi.process.exec` for running `podman compose` and `git` commands
+
+### Error Handling Standards
+- Always provide user-friendly error messages via `podmanDesktopApi.window.showErrorMessage`
+- Show success messages via `podmanDesktopApi.window.showInformationMessage`
+- Log detailed errors for debugging with proper context
+- Validate repository existence before operations
+- Handle async operations with proper try/catch blocks
+- Check for git and podman availability
+- Provide meaningful error types that the UI can handle appropriately
+
+
+## Implementation Workflow
+1. Start with shared API definition (abstract class following HelloWorld pattern)
+2. Implement backend with repository management and proper error handling
+3. Use extensionContext.storagePath for default storage location
+4. Create comprehensive tests covering git operations and compose commands
+5. Add tray icon commands for starting, stopping and restarting rhdh-local
+6. Build reactive Svelte UI for editing config files with loading states and error handling
+7. Test complete user workflow from repository cloning to service management

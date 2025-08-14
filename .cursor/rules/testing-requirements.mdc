@@ -1,0 +1,74 @@
+---
+description: Testing requirements and patterns using Vitest and Testing Library
+globs: ["**/*.test.ts", "**/*.spec.ts", "**/__tests__/**"]
+alwaysApply: false
+---
+
+# Testing Requirements
+
+## Testing Framework
+- Use Vitest for all unit and integration tests
+- Use `@testing-library/svelte` for component testing
+- Mock Podman Desktop API calls using provided `__mocks__` directory
+- Aim for comprehensive test coverage of business logic
+
+## Test Structure
+```typescript
+// Unit test example
+import { describe, it, expect, vi } from 'vitest';
+import { rhdlLocalApi } from '../src/api-impl';
+
+describe('RHDHLocalApi', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should start rhdh-local successfully', async () => {
+    // Mock the process.exec call
+    const mockExec = vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    vi.mocked(podmanDesktopApi.process.exec).mockImplementation(mockExec);
+
+    const api = new rhdlLocalApi(mockContext);
+    await api.start();
+
+    expect(mockExec).toHaveBeenCalledWith('podman', ['compose', 'up', '-d'], { cwd: expect.any(String) });
+  });
+});
+```
+
+## Component Testing
+```typescript
+// Component test example
+import { render, fireEvent } from '@testing-library/svelte';
+import { describe, it, expect, vi } from 'vitest';
+import RHDHControls from '../src/RHDHControls.svelte';
+
+describe('RHDHControls', () => {
+  it('should call start when start button is clicked', async () => {
+    const mockStart = vi.fn();
+    const { getByRole } = render(RHDHControls, { onStart: mockStart });
+    
+    await fireEvent.click(getByRole('button', { name: 'Start' }));
+    expect(mockStart).toHaveBeenCalled();
+  });
+});
+```
+
+## Mocking Patterns
+- Mock all `podmanDesktopApi` calls in tests
+- Test both success and error scenarios
+- Mock file system operations when testing configuration management
+- Use proper cleanup in test teardown
+
+## Coverage Requirements
+- Test all public API methods
+- Cover error handling paths
+- Test user interaction flows in components
+- Validate configuration parsing and validation logic
+- Test process execution error scenarios
+
+## Test Organization
+- Group related tests in describe blocks
+- Use descriptive test names that explain the expected behavior
+- Setup and teardown properly to avoid test interdependency
+- Use `beforeEach` and `afterEach` for common setup/cleanup
