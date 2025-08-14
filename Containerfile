@@ -13,4 +13,6 @@ LABEL org.opencontainers.image.title="Your Hello World Extension" \
         org.opencontainers.image.vendor="Your Org / Username" \
         io.podman-desktop.api.version=">= 1.12.0"
 
+LABEL org.opencontainers.image.description asdf
+
 COPY --from=builder /extension /extension
