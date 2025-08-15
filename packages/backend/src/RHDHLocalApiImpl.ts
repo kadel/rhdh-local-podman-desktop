@@ -593,6 +593,75 @@ includes:
     }
   }
 
+  async getConfiguration(configType: ConfigurationType): Promise<ConfigurationFile> {
+    if (!(await this.isRepositoryInstalled())) {
+      throw new Error('Repository not installed. Please clone it first.');
+    }
+
+    // Find the config file info
+    const configInfo = this.configFilesToCopy.find(config => config.configType === configType);
+    if (!configInfo) {
+      throw new Error(`Configuration type '${configType}' is not supported`);
+    }
+
+    const configPath = configInfo.target;
+    
+    try {
+      // Check if file exists
+      if (!(await this.pathExists(configPath))) {
+        throw new Error(`Configuration file not found: ${path.basename(configPath)}`);
+      }
+
+      // Read file content
+      const content = await fs.promises.readFile(configPath, 'utf8');
+      const stats = await fs.promises.stat(configPath);
+
+      return {
+        type: configType,
+        path: configPath,
+        content,
+        lastModified: stats.mtime,
+      };
+    } catch (error) {
+      const message = `Failed to read ${configType} configuration: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      await podmanDesktopApi.window.showErrorMessage(message);
+      throw new Error(message);
+    }
+  }
+
+  async updateConfiguration(configType: ConfigurationType, content: string): Promise<void> {
+    if (!(await this.isRepositoryInstalled())) {
+      throw new Error('Repository not installed. Please clone it first.');
+    }
+
+    // Find the config file info
+    const configInfo = this.configFilesToCopy.find(config => config.configType === configType);
+    if (!configInfo) {
+      throw new Error(`Configuration type '${configType}' is not supported`);
+    }
+
+    const configPath = configInfo.target;
+
+    try {
+      // Ensure the directory exists
+      await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+
+      // Write the updated content
+      await fs.promises.writeFile(configPath, content, 'utf8');
+      
+      console.log(`Successfully updated ${configType} configuration: ${path.basename(configPath)}`);
+      
+      // Show success message
+      await podmanDesktopApi.window.showInformationMessage(
+        `Configuration file '${path.basename(configPath)}' has been updated successfully.`
+      );
+    } catch (error) {
+      const message = `Failed to update ${configType} configuration: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      await podmanDesktopApi.window.showErrorMessage(message);
+      throw new Error(message);
+    }
+  }
+
 
   private async isRepositoryInstalled(): Promise<boolean> {
     try {

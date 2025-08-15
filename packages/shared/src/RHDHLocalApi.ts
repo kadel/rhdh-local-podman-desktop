@@ -86,6 +86,10 @@ export abstract class RHDHLocalApi {
   abstract pullLatest(): Promise<void>;
   abstract resetToClean(): Promise<void>; // git reset --hard HEAD
 
+  // Configuration management
+  abstract getConfiguration(configType: ConfigurationType): Promise<ConfigurationFile>;
+  abstract updateConfiguration(configType: ConfigurationType, content: string): Promise<void>;
+
   // Utilities
   abstract openRHDHInBrowser(): Promise<void>;
   abstract openExternalUrl(url: string): Promise<void>;

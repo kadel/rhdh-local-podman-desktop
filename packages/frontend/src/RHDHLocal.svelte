@@ -22,11 +22,12 @@ import {
   faExclamationTriangle,
   faSyncAlt,
   faCopy,
-  faCodeBranch
+  faCodeBranch,
+  faSave
 } from '@fortawesome/free-solid-svg-icons';
 import { Button } from '@podman-desktop/ui-svelte';
 import { rhdhLocalClient } from './api/client';
-import type { RHDHStatus, InstallationCheck, RHDHServiceStatus } from '/@shared/src/RHDHLocalApi';
+import type { RHDHStatus, InstallationCheck, RHDHServiceStatus, ConfigurationType, ConfigurationFile } from '/@shared/src/RHDHLocalApi';
 
 /**
  * RHDH Local Status Dashboard
@@ -51,6 +52,13 @@ let streamingLogs: { [serviceName: string]: boolean } = {};
 let logLines: { [serviceName: string]: string[] } = {};
 let showLogs: { [serviceName: string]: boolean } = {};
 let lastLogTimestamp: { [serviceName: string]: Date } = {};
+
+// Configuration state
+let configFiles: { [key in ConfigurationType]?: ConfigurationFile } = {};
+let configContents: { [key in ConfigurationType]?: string } = {};
+let configLoading: { [key in ConfigurationType]?: boolean } = {};
+let configSaving: { [key in ConfigurationType]?: boolean } = {};
+let configsLoaded = false;
 
 onMount(() => {
   loadStatus();
@@ -82,6 +90,11 @@ async function loadStatus() {
     // Set initial active tab if not set
     if (status && status.services && Object.keys(status.services).length > 0 && !activeServiceTab) {
       activeServiceTab = Object.keys(status.services)[0];
+    }
+
+    // Auto-load configurations if repository is installed and not already loaded
+    if (status?.isInstalled && !configsLoaded) {
+      await loadAllConfigurations();
     }
     
     loading = false;
@@ -260,6 +273,84 @@ function formatUptime(uptime?: string): string {
 function renderIcon(icon: any, className: string = '') {
   return `<i class="fas fa-${icon.iconName} ${className}"></i>`;
 }
+
+// Configuration functions
+const configTypes: ConfigurationType[] = ['env', 'app-config', 'dynamic-plugins', 'users', 'components'];
+
+async function loadConfiguration(configType: ConfigurationType) {
+  try {
+    configLoading = { ...configLoading, [configType]: true };
+    
+    const configFile = await rhdhLocalClient.getConfiguration(configType);
+    configFiles = { ...configFiles, [configType]: configFile };
+    configContents = { ...configContents, [configType]: configFile.content };
+  } catch (err) {
+    console.error(`Failed to load ${configType} configuration:`, err);
+    error = err instanceof Error ? err.message : `Failed to load ${configType} configuration`;
+  } finally {
+    configLoading = { ...configLoading, [configType]: false };
+  }
+}
+
+async function saveConfiguration(configType: ConfigurationType) {
+  const content = configContents[configType];
+  if (content === undefined) return;
+
+  try {
+    configSaving = { ...configSaving, [configType]: true };
+    
+    await rhdhLocalClient.updateConfiguration(configType, content);
+    
+    // Reload the configuration to get updated metadata
+    await loadConfiguration(configType);
+  } catch (err) {
+    console.error(`Failed to save ${configType} configuration:`, err);
+    error = err instanceof Error ? err.message : `Failed to save ${configType} configuration`;
+  } finally {
+    configSaving = { ...configSaving, [configType]: false };
+  }
+}
+
+async function loadAllConfigurations() {
+  if (!status?.isInstalled) return;
+  
+  try {
+    // Load all configuration files in parallel
+    await Promise.all(configTypes.map(configType => loadConfiguration(configType)));
+    configsLoaded = true;
+  } catch (err) {
+    console.error('Failed to load configurations:', err);
+    // Individual loadConfiguration functions will handle their own errors
+  }
+}
+
+function getConfigDisplayName(configType: ConfigurationType): string {
+  switch (configType) {
+    case 'env': return 'Environment Variables (.env)';
+    case 'app-config': return 'App Configuration (app-config.local.yaml)';
+    case 'dynamic-plugins': return 'Dynamic Plugins (dynamic-plugins.override.yaml)';
+    case 'users': return 'User Entities (users.override.yaml)';
+    case 'components': return 'Component Entities (components.override.yaml)';
+    default: return configType;
+  }
+}
+
+function getConfigDescription(configType: ConfigurationType): string {
+  switch (configType) {
+    case 'env': return 'Environment variables for RHDH Local deployment';
+    case 'app-config': return 'Main RHDH application configuration overrides';
+    case 'dynamic-plugins': return 'Configuration for dynamic plugins and their settings';
+    case 'users': return 'User catalog entities for the RHDH instance';
+    case 'components': return 'Component catalog entities for the RHDH instance';
+    default: return `Configuration for ${configType}`;
+  }
+}
+
+function isContentModified(configType: ConfigurationType): boolean {
+  const currentContent = configContents[configType];
+  const originalContent = configFiles[configType]?.content;
+  return currentContent !== undefined && currentContent !== originalContent;
+}
 </script>
 
 <div class="flex flex-col h-full p-6 bg-[var(--pd-content-bg)]">
@@ -330,6 +421,7 @@ function renderIcon(icon: any, className: string = '') {
         </Button>
       </div>
     </div>
+
   {:else if status}
     <div class="flex-1 overflow-auto space-y-6">
       <!-- Overall Status Card -->
@@ -521,6 +613,117 @@ function renderIcon(icon: any, className: string = '') {
           </Button>
         </div>
       </div>
+
+      <!-- Configuration Files -->
+      {#if configsLoaded}
+        <div class="bg-[var(--pd-content-card-bg)] rounded-lg p-6 border border-[var(--pd-content-divider)]">
+          <div class="flex items-center gap-3 mb-6">
+            {@html renderIcon(faCode, 'text-2xl text-purple-500')}
+            <div>
+              <h2 class="text-xl font-semibold text-[var(--pd-content-header)]">Configuration Files</h2>
+              <p class="text-sm text-[var(--pd-content-sub)]">Edit RHDH Local configuration files</p>
+            </div>
+          </div>
+
+          <div class="space-y-6">
+            {#each configTypes as configType}
+              <div class="bg-[var(--pd-content-bg)] rounded-lg p-4 border border-[var(--pd-content-divider)]">
+                <div class="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 class="text-lg font-semibold text-[var(--pd-content-header)]">
+                      {getConfigDisplayName(configType)}
+                    </h3>
+                    <p class="text-sm text-[var(--pd-content-sub)] mt-1">
+                      {getConfigDescription(configType)}
+                    </p>
+                    {#if configFiles[configType]?.lastModified}
+                      <p class="text-xs text-[var(--pd-content-sub)] mt-1">
+                        Last modified: {configFiles[configType]?.lastModified?.toLocaleString()}
+                      </p>
+                    {/if}
+                  </div>
+                  <div class="flex gap-2 items-center">
+                    {#if isContentModified(configType)}
+                      <span class="text-xs text-yellow-600 dark:text-yellow-400 bg-yellow-100 dark:bg-yellow-900/20 px-2 py-1 rounded">
+                        Modified
+                      </span>
+                    {/if}
+                    <Button 
+                      size="sm"
+                      on:click={() => saveConfiguration(configType)}
+                      disabled={!isContentModified(configType) || configSaving[configType]}
+                      class="bg-green-500 hover:bg-green-600">
+                      {#if configSaving[configType]}
+                        {@html renderIcon(faSpinner, 'animate-spin mr-2')}
+                      {:else}
+                        {@html renderIcon(faSave, 'mr-2')}
+                      {/if}
+                      Save
+                    </Button>
+                  </div>
+                </div>
+
+                {#if configLoading[configType]}
+                  <div class="flex items-center justify-center p-8">
+                    <div class="flex flex-col items-center gap-2">
+                      {@html renderIcon(faSpinner, 'animate-spin text-xl text-purple-500')}
+                      <p class="text-sm text-[var(--pd-content-sub)]">Loading configuration...</p>
+                    </div>
+                  </div>
+                {:else if configContents[configType] !== undefined}
+                  <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                      <label class="text-sm font-medium text-[var(--pd-content-sub)]" for="config-{configType}">
+                        File Content:
+                      </label>
+                      <div class="flex items-center gap-2">
+                        <span class="text-xs text-[var(--pd-content-sub)]">
+                          {configContents[configType]?.split('\n').length || 0} lines
+                        </span>
+                        {#if configFiles[configType]?.path}
+                          <button 
+                            class="text-xs hover:text-purple-500 transition-colors"
+                            title="Copy File Path"
+                            on:click={async () => {
+                              try {
+                                if (configFiles[configType]?.path) {
+                                  await navigator.clipboard.writeText(configFiles[configType]?.path || '');
+                                  console.log('Configuration file path copied to clipboard');
+                                }
+                              } catch (err) {
+                                console.error('Failed to copy file path:', err);
+                              }
+                            }}>
+                            {@html renderIcon(faCopy, 'text-xs')}
+                          </button>
+                        {/if}
+                      </div>
+                    </div>
+                    <textarea 
+                      id="config-{configType}"
+                      bind:value={configContents[configType]}
+                      class="w-full h-64 p-4 bg-gray-900 text-green-400 font-mono text-sm rounded-lg border border-[var(--pd-content-divider)] resize-y focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      placeholder="Configuration content..."
+                      spellcheck="false"
+                    ></textarea>
+                  </div>
+                {:else}
+                  <div class="text-center p-8 text-[var(--pd-content-sub)]">
+                    <p>Configuration file not found or failed to load</p>
+                    <Button 
+                      size="sm"
+                      class="mt-2"
+                      on:click={() => loadConfiguration(configType)}>
+                      {@html renderIcon(faRefresh, 'mr-2')}
+                      Retry
+                    </Button>
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
 
       <!-- Services Status -->
       <div class="bg-[var(--pd-content-card-bg)] rounded-lg border border-[var(--pd-content-divider)]">
