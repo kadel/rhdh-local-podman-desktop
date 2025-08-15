@@ -93,5 +93,6 @@ export abstract class RHDHLocalApi {
   // Utilities
   abstract openRHDHInBrowser(): Promise<void>;
   abstract openExternalUrl(url: string): Promise<void>;
+  abstract openConfigInExternalEditor(configType: ConfigurationType): Promise<void>;
   abstract getInstanceConfig(): Promise<InstanceConfig>;
 }

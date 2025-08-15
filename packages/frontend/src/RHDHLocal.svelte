@@ -28,6 +28,7 @@ import {
 import { Button } from '@podman-desktop/ui-svelte';
 import { rhdhLocalClient } from './api/client';
 import type { RHDHStatus, InstallationCheck, RHDHServiceStatus, ConfigurationType, ConfigurationFile } from '/@shared/src/RHDHLocalApi';
+import SyntaxHighlightedEditor from './lib/SyntaxHighlightedEditor.svelte';
 
 /**
  * RHDH Local Status Dashboard
@@ -351,6 +352,20 @@ function isContentModified(configType: ConfigurationType): boolean {
   const originalContent = configFiles[configType]?.content;
   return currentContent !== undefined && currentContent !== originalContent;
 }
+
+function getLanguageForConfig(configType: ConfigurationType): string {
+  switch (configType) {
+    case 'env':
+      return 'properties';
+    case 'app-config':
+    case 'dynamic-plugins':
+    case 'users':
+    case 'components':
+      return 'yaml';
+    default:
+      return 'yaml';
+  }
+}
 </script>
 
 <div class="flex flex-col h-full p-6 bg-[var(--pd-content-bg)]">
@@ -660,6 +675,18 @@ function isContentModified(configType: ConfigurationType): boolean {
                       {/if}
                       Save
                     </Button>
+                    <Button 
+                      size="sm"
+                      on:click={() => performAction(`openExternal-${configType}`, () => rhdhLocalClient.openConfigInExternalEditor(configType))}
+                      disabled={actionLoading[`openExternal-${configType}`]}
+                      title="Open in External Editor">
+                      {#if actionLoading[`openExternal-${configType}`]}
+                        {@html renderIcon(faSpinner, 'animate-spin mr-2')}
+                      {:else}
+                        {@html renderIcon(faExternalLinkAlt, 'mr-2')}
+                      {/if}
+                      External Editor
+                    </Button>
                   </div>
                 </div>
 
@@ -699,13 +726,12 @@ function isContentModified(configType: ConfigurationType): boolean {
                         {/if}
                       </div>
                     </div>
-                    <textarea 
-                      id="config-{configType}"
+                    <SyntaxHighlightedEditor
                       bind:value={configContents[configType]}
-                      class="w-full h-64 p-4 bg-gray-900 text-green-400 font-mono text-sm rounded-lg border border-[var(--pd-content-divider)] resize-y focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      language={getLanguageForConfig(configType)}
                       placeholder="Configuration content..."
-                      spellcheck="false"
-                    ></textarea>
+                      className="w-full"
+                    />
                   </div>
                 {:else}
                   <div class="text-center p-8 text-[var(--pd-content-sub)]">

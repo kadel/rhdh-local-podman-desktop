@@ -583,6 +583,32 @@ includes:
     }
   }
 
+  async openConfigInExternalEditor(configType: ConfigurationType): Promise<void> {
+    try {
+      if (!(await this.isRepositoryInstalled())) {
+        throw new Error('Repository not installed. Please clone it first.');
+      }
+
+      // Find the config file info
+      const configInfo = this.configFilesToCopy.find(config => config.configType === configType);
+      if (!configInfo) {
+        throw new Error(`Configuration type '${configType}' is not supported`);
+      }
+      const configPath = configInfo.target;
+      const fileUri = podmanDesktopApi.Uri.parse(`file://${configPath}`);
+      
+      await podmanDesktopApi.env.openExternal(fileUri);
+      
+      await podmanDesktopApi.window.showInformationMessage(
+        `Opening ${configType} configuration file in external editor`
+      );
+    } catch (error) {
+      const message = `Failed to open configuration file in external editor: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      await podmanDesktopApi.window.showErrorMessage(message);
+      throw new Error(message);
+    }
+  }
+
   async openWorkingDirectory(): Promise<void> {
     try {
       await podmanDesktopApi.env.openExternal(podmanDesktopApi.Uri.parse(`file://${this.configuration.repoPath}`));
