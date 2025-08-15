@@ -1,4 +1,4 @@
-import sveltePreprocess from 'svelte-preprocess';
+import { sveltePreprocess } from 'svelte-preprocess';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 

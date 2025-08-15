@@ -1,0 +1,563 @@
+<script lang="ts">
+import { onMount, onDestroy } from 'svelte';
+import { 
+  faRocket, 
+  faPlay, 
+  faStop, 
+  faRotate, 
+  faExternalLinkAlt,
+  faDownload,
+  faCheckCircle,
+  faExclamationCircle,
+  faClock,
+  faCode,
+  faDatabase,
+  faPuzzlePiece,
+  faRefresh,
+  faEye,
+  faTimes,
+  faSpinner,
+  faSync,
+  faRedo,
+  faExclamationTriangle,
+  faSyncAlt,
+  faCopy,
+  faCodeBranch
+} from '@fortawesome/free-solid-svg-icons';
+import { Button } from '@podman-desktop/ui-svelte';
+import { rhdhLocalClient } from './api/client';
+import type { RHDHStatus, InstallationCheck, RHDHServiceStatus } from '/@shared/src/RHDHLocalApi';
+
+/**
+ * RHDH Local Status Dashboard
+ * Provides comprehensive view and management of RHDH Local instances
+ */
+
+let status: RHDHStatus | null = null;
+let installationCheck: InstallationCheck | null = null;
+let loading = true;
+let error: string | null = null;
+let refreshInterval: NodeJS.Timeout;
+
+// Actions loading states
+let actionLoading: { [key: string]: boolean } = {};
+
+// Tab state for services
+let activeServiceTab: string = '';
+
+onMount(() => {
+  loadStatus();
+  // Auto-refresh every 10 seconds
+  refreshInterval = setInterval(loadStatus, 10000);
+});
+
+onDestroy(() => {
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
+  }
+});
+
+async function loadStatus() {
+  try {
+    error = null;
+    const [statusResult, installCheck] = await Promise.all([
+      rhdhLocalClient.getStatus(),
+      rhdhLocalClient.checkInstallation()
+    ]);
+    
+    status = statusResult;
+    installationCheck = installCheck;
+    
+    // Set initial active tab if not set
+    if (status && status.services && Object.keys(status.services).length > 0 && !activeServiceTab) {
+      activeServiceTab = Object.keys(status.services)[0];
+    }
+    
+    loading = false;
+  } catch (err) {
+    console.error('Failed to load status:', err);
+    error = err instanceof Error ? err.message : 'Failed to load status';
+    loading = false;
+  }
+}
+
+async function performAction(actionName: string, action: () => Promise<void>) {
+  try {
+    actionLoading[actionName] = true;
+    await action();
+    // Refresh status after action
+    await loadStatus();
+  } catch (err) {
+    console.error(`Failed to ${actionName}:`, err);
+    error = err instanceof Error ? err.message : `Failed to ${actionName}`;
+  } finally {
+    actionLoading[actionName] = false;
+  }
+}
+
+function getServiceIcon(serviceName: string) {
+  switch (serviceName) {
+    case 'rhdh': return faCode;
+    case 'postgresql': return faDatabase;
+    case 'install-dynamic-plugins': return faPuzzlePiece;
+    default: return faCheckCircle;
+  }
+}
+
+function getStatusColor(serviceStatus: RHDHServiceStatus) {
+  switch (serviceStatus.status) {
+    case 'running': return 'text-green-500';
+    case 'stopped': return 'text-gray-500';
+    case 'error': return 'text-red-500';
+    case 'not-used': return 'text-yellow-500';
+    default: return 'text-gray-400';
+  }
+}
+
+function getStatusIcon(serviceStatus: RHDHServiceStatus) {
+  switch (serviceStatus.status) {
+    case 'running': return faCheckCircle;
+    case 'stopped': return faStop;
+    case 'error': return faExclamationCircle;
+    case 'not-used': return faDownload;
+    default: return faClock;
+  }
+}
+
+function formatUptime(uptime?: string): string {
+  if (!uptime) return 'N/A';
+  return uptime;
+}
+
+function renderIcon(icon: any, className: string = '') {
+  return `<i class="fas fa-${icon.iconName} ${className}"></i>`;
+}
+</script>
+
+<div class="flex flex-col h-full p-6 bg-[var(--pd-content-bg)]">
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center gap-3">
+      {@html renderIcon(faRocket, 'text-2xl text-purple-500')}
+      <div>
+        <h1 class="text-2xl font-bold text-[var(--pd-content-header)]">RHDH Local</h1>
+        <p class="text-sm text-[var(--pd-content-sub)]">Red Hat Developer Hub Local Management</p>
+      </div>
+    </div>
+    
+    <div class="flex gap-2">
+      <Button 
+        on:click={loadStatus} 
+        disabled={loading}
+        title="Refresh Status">
+        {@html renderIcon(faSyncAlt, loading ? 'animate-spin' : '')}
+        Refresh
+      </Button>
+    </div>
+  </div>
+
+  {#if loading}
+    <div class="flex items-center justify-center h-64">
+      <div class="flex flex-col items-center gap-4">
+        {@html renderIcon(faSpinner, 'animate-spin text-3xl text-purple-500')}
+        <p class="text-[var(--pd-content-sub)]">Loading RHDH Local status...</p>
+      </div>
+    </div>
+  {:else if error}
+    <div class="flex items-center justify-center h-64">
+      <div class="flex flex-col items-center gap-4 p-6 bg-red-50 dark:bg-red-900/20 rounded-lg">
+        {@html renderIcon(faExclamationTriangle, 'text-3xl text-red-500')}
+        <p class="text-red-600 dark:text-red-400 text-center">{error}</p>
+        <Button on:click={loadStatus}>Try Again</Button>
+      </div>
+    </div>
+  {:else if !installationCheck?.installed}
+    <div class="flex items-center justify-center h-64">
+      <div class="flex flex-col items-center gap-4 p-8 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg max-w-md text-center">
+        {@html renderIcon(faDownload, 'text-3xl text-yellow-500')}
+        <h3 class="text-lg font-semibold text-[var(--pd-content-header)]">RHDH Local Not Installed</h3>
+        <p class="text-[var(--pd-content-sub)]">Clone the RHDH Local repository to get started.</p>
+        
+        {#if installationCheck?.issues && installationCheck.issues.length > 0}
+          <div class="text-left w-full">
+            <p class="text-sm font-medium text-red-600 dark:text-red-400 mb-2">Requirements Issues:</p>
+            <ul class="text-sm text-red-600 dark:text-red-400 space-y-1">
+              {#each installationCheck.issues as issue}
+                <li>• {issue}</li>
+              {/each}
+            </ul>
+          </div>
+        {/if}
+        
+        <Button 
+          on:click={() => performAction('clone', () => rhdhLocalClient.cloneRepository())}
+          disabled={actionLoading.clone || !installationCheck?.gitAvailable}
+          class="mt-4">
+          {#if actionLoading.clone}
+            {@html renderIcon(faSpinner, 'animate-spin mr-2')}
+          {:else}
+            {@html renderIcon(faDownload, 'mr-2')}
+          {/if}
+          Clone Repository
+        </Button>
+      </div>
+    </div>
+  {:else if status}
+    <div class="flex-1 overflow-auto space-y-6">
+      <!-- Overall Status Card -->
+      <div class="bg-[var(--pd-content-card-bg)] rounded-lg p-6 border border-[var(--pd-content-divider)]">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold text-[var(--pd-content-header)]">Overall Status</h2>
+          <div class="flex items-center gap-2">
+            <div class={`w-3 h-3 rounded-full ${status.isRunning ? 'bg-green-500' : 'bg-gray-500'}`}></div>
+            <span class={`font-medium ${status.isRunning ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-400'}`}>
+              {status.isRunning ? 'Running' : 'Stopped'}
+            </span>
+          </div>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <div>
+            <p class="text-sm text-[var(--pd-content-sub)] mb-1">Access URL</p>
+            <div class="flex items-center gap-2">
+              <p class="text-sm text-[var(--pd-content-header)]">
+                {status.url || 'Not available'}
+              </p>
+              {#if status.url && status.isRunning}
+                <Button 
+                  on:click={() => performAction('openBrowser', () => rhdhLocalClient.openRHDHInBrowser())}
+                  disabled={actionLoading.openBrowser}
+                  title="Open in Browser">
+                  {@html renderIcon(faExternalLinkAlt)}
+                </Button>
+              {/if}
+            </div>
+          </div>
+
+          <div></div> <!-- Empty div to maintain grid alignment -->
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex flex-wrap gap-2">
+          {#if status.isRunning}
+            <Button 
+              on:click={() => performAction('stop', () => rhdhLocalClient.stop())}
+              disabled={actionLoading.stop}
+              class="bg-red-500 hover:bg-red-600">
+              {#if actionLoading.stop}
+                {@html renderIcon(faSpinner, 'animate-spin mr-2')}
+              {:else}
+                {@html renderIcon(faStop, 'mr-2')}
+              {/if}
+              Stop
+            </Button>
+            
+            <Button 
+              on:click={() => performAction('restart', () => rhdhLocalClient.restart())}
+              disabled={actionLoading.restart}>
+              {#if actionLoading.restart}
+                {@html renderIcon(faSpinner, 'animate-spin mr-2')}
+              {:else}
+                {@html renderIcon(faRedo, 'mr-2')}
+              {/if}
+              Restart
+            </Button>
+          {:else}
+            <Button 
+              on:click={() => performAction('start', () => rhdhLocalClient.start())}
+              disabled={actionLoading.start}
+              class="bg-green-500 hover:bg-green-600">
+              {#if actionLoading.start}
+                {@html renderIcon(faSpinner, 'animate-spin mr-2')}
+              {:else}
+                {@html renderIcon(faPlay, 'mr-2')}
+              {/if}
+              Start
+            </Button>
+          {/if}
+
+          <Button 
+            on:click={() => performAction('installPlugins', () => rhdhLocalClient.installPlugins())}
+            disabled={actionLoading.installPlugins}>
+            {#if actionLoading.installPlugins}
+              {@html renderIcon(faSpinner, 'animate-spin mr-2')}
+            {:else}
+              {@html renderIcon(faPuzzlePiece, 'mr-2')}
+            {/if}
+            Install Plugins
+          </Button>
+        </div>
+      </div>
+
+      <!-- RHDH-Local Repository -->
+      <div class="bg-[var(--pd-content-card-bg)] rounded-lg p-6 border border-[var(--pd-content-divider)]">
+        <h2 class="text-lg font-semibold text-[var(--pd-content-header)] mb-4">RHDH-Local Repository</h2>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+          {#if installationCheck?.path}
+            <div>
+              <p class="text-sm text-[var(--pd-content-sub)] mb-1">Repository Path</p>
+              <div class="flex items-center gap-2">
+                <p class="text-sm text-[var(--pd-content-header)] font-mono" title="{installationCheck.path}">
+                  {installationCheck.path}
+                </p>
+                <button 
+                  class="text-xs hover:text-purple-500 transition-colors"
+                  title="Copy Repository Path"
+                  on:click={async () => {
+                    try {
+                      if (installationCheck?.path) {
+                        await navigator.clipboard.writeText(installationCheck.path);
+                        console.log('Repository path copied to clipboard');
+                      }
+                    } catch (err) {
+                      console.error('Failed to copy repository path:', err);
+                    }
+                  }}>
+                  {@html renderIcon(faCopy, 'text-xs')}
+                </button>
+              </div>
+            </div>
+          {/if}
+
+          {#if status.gitBranch}
+            <div>
+              <p class="text-sm text-[var(--pd-content-sub)] mb-1">Current Branch</p>
+              <div class="flex items-center gap-2">
+                {@html renderIcon(faCodeBranch, 'text-purple-500')}
+                <p class="text-sm text-[var(--pd-content-header)] font-mono">
+                  {status.gitBranch}
+                </p>
+              </div>
+            </div>
+          {/if}
+
+          {#if status.gitCommit}
+            <div>
+              <p class="text-sm text-[var(--pd-content-sub)] mb-1">Latest Commit</p>
+              <div class="flex items-center gap-2">
+                <p class="text-sm text-[var(--pd-content-header)] font-mono bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded"
+                   title="Full commit: {status.gitCommit}">
+                  {status.gitCommit.substring(0, 8)}
+                </p>
+                <button 
+                  class="text-xs hover:text-purple-500 transition-colors"
+                  title="Copy Full Commit Hash"
+                  on:click={async () => {
+                    try {
+                      if (status?.gitCommit) {
+                        await navigator.clipboard.writeText(status.gitCommit);
+                        console.log('Git commit hash copied to clipboard');
+                      }
+                    } catch (err) {
+                      console.error('Failed to copy git commit hash:', err);
+                    }
+                  }}>
+                  {@html renderIcon(faCopy, 'text-xs')}
+                </button>
+              </div>
+            </div>
+          {/if}
+        </div>
+
+        <div class="text-sm text-[var(--pd-content-sub)] mb-4">
+          Repository URL: <code class="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">https://github.com/redhat-developer/rhdh-local</code>
+        </div>
+
+        <!-- Repository Actions -->
+        <div class="flex flex-wrap gap-2">
+          <Button 
+            size="sm"
+            on:click={() => performAction('update', () => rhdhLocalClient.updateRepository())}
+            disabled={actionLoading.update}
+            title="Pull latest changes from remote repository">
+            {#if actionLoading.update}
+              {@html renderIcon(faSpinner, 'animate-spin mr-2')}
+            {:else}
+              {@html renderIcon(faSync, 'mr-2')}
+            {/if}
+            Update Repository
+          </Button>
+
+          <Button 
+            size="sm"
+            on:click={() => performAction('openGitHub', () => rhdhLocalClient.openExternalUrl('https://github.com/redhat-developer/rhdh-local'))}
+            disabled={actionLoading.openGitHub}
+            title="Open repository in GitHub">
+            {#if actionLoading.openGitHub}
+              {@html renderIcon(faSpinner, 'animate-spin mr-2')}
+            {:else}
+              {@html renderIcon(faExternalLinkAlt, 'mr-2')}
+            {/if}
+            View on GitHub
+          </Button>
+        </div>
+      </div>
+
+      <!-- Services Status -->
+      <div class="bg-[var(--pd-content-card-bg)] rounded-lg border border-[var(--pd-content-divider)]">
+        <h2 class="text-lg font-semibold text-[var(--pd-content-header)] p-6 pb-0">Services</h2>
+        
+        <!-- Service Tabs Navigation -->
+        <div class="flex border-b border-[var(--pd-content-divider)] overflow-x-auto">
+          {#each Object.entries(status.services) as [serviceName, serviceStatus]}
+            <button
+              class={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap border-b-2 ${
+                activeServiceTab === serviceName 
+                  ? 'border-purple-500 text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/10' 
+                  : 'border-transparent text-[var(--pd-content-sub)] hover:text-[var(--pd-content-header)] hover:bg-[var(--pd-content-bg)]'
+              }`}
+              on:click={() => activeServiceTab = serviceName}
+            >
+              {@html renderIcon(getServiceIcon(serviceName), 'text-inherit')}
+              <span class="capitalize">{serviceName.replace('-', ' ')}</span>
+              {@html renderIcon(getStatusIcon(serviceStatus), `ml-1 ${getStatusColor(serviceStatus)}`)}
+            </button>
+          {/each}
+        </div>
+        
+        <!-- Active Service Tab Content -->
+        {#if activeServiceTab && status.services[activeServiceTab]}
+          {@const serviceStatus = status.services[activeServiceTab]}
+          <div class="p-6">
+            <!-- Service Header -->
+            <div class="flex items-center justify-between mb-6">
+              <div class="flex items-center gap-3">
+                {@html renderIcon(getServiceIcon(activeServiceTab), 'text-2xl text-purple-500')}
+                <div>
+                  <h3 class="text-xl font-semibold text-[var(--pd-content-header)] capitalize">
+                    {activeServiceTab.replace('-', ' ')}
+                  </h3>
+                  <div class="flex items-center gap-2 mt-1">
+                    <div class={`w-2 h-2 rounded-full ${
+                      serviceStatus.status === 'running' ? 'bg-green-500' : 
+                      serviceStatus.status === 'error' ? 'bg-red-500' : 
+                      serviceStatus.status === 'not-used' ? 'bg-yellow-500' : 'bg-gray-500'
+                    }`}></div>
+                    <span class={`text-sm capitalize ${getStatusColor(serviceStatus)}`}>
+                      {serviceStatus.status}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Service Actions -->
+              <div class="flex gap-2">
+                {#if serviceStatus.status === 'running'}
+                  <Button 
+                    size="sm"
+                    on:click={() => performAction(`restart-${activeServiceTab}`, () => rhdhLocalClient.restartService(activeServiceTab))}
+                    disabled={actionLoading[`restart-${activeServiceTab}`]}
+                    title="Restart Service">
+                    {#if actionLoading[`restart-${activeServiceTab}`]}
+                      {@html renderIcon(faSpinner, 'animate-spin mr-2')}
+                    {:else}
+                      {@html renderIcon(faRedo, 'mr-2')}
+                    {/if}
+                    Restart
+                  </Button>
+                {/if}
+                
+                <Button 
+                  size="sm"
+                  on:click={() => performAction(`logs-${activeServiceTab}`, async () => {
+                    const logs = await rhdhLocalClient.getLogs(activeServiceTab, 100);
+                    console.log(`${activeServiceTab} logs:`, logs);
+                    // TODO: Show logs in modal or new view
+                  })}
+                  disabled={actionLoading[`logs-${activeServiceTab}`]}
+                  title="View Logs">
+                  {#if actionLoading[`logs-${activeServiceTab}`]}
+                    {@html renderIcon(faSpinner, 'animate-spin mr-2')}
+                  {:else}
+                    {@html renderIcon(faEye, 'mr-2')}
+                  {/if}
+                  View Logs
+                </Button>
+              </div>
+            </div>
+            
+            <!-- Service Details -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div class="space-y-3">
+                <h4 class="text-sm font-medium text-[var(--pd-content-sub)] uppercase tracking-wider">Status Information</h4>
+                
+                <div class="space-y-2">
+                  <div class="flex justify-between items-center">
+                    <span class="text-sm text-[var(--pd-content-sub)]">Current Status:</span>
+                    <span class={`text-sm font-medium capitalize ${getStatusColor(serviceStatus)}`}>
+                      {serviceStatus.status}
+                    </span>
+                  </div>
+                  
+                  {#if serviceStatus.uptime}
+                    <div class="flex justify-between items-center">
+                      <span class="text-sm text-[var(--pd-content-sub)]">Uptime:</span>
+                      <span class="text-sm font-medium text-[var(--pd-content-header)]">
+                        {formatUptime(serviceStatus.uptime)}
+                      </span>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+              
+              {#if serviceStatus.containerId}
+                <div class="space-y-3">
+                  <h4 class="text-sm font-medium text-[var(--pd-content-sub)] uppercase tracking-wider">Container Information</h4>
+                  
+                  <div class="space-y-2">
+                    <div class="flex justify-between items-center">
+                      <span class="text-sm text-[var(--pd-content-sub)]">Container ID:</span>
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm font-mono bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded" 
+                              title="Full Container ID: {serviceStatus.containerId}">
+                          {serviceStatus.containerId.substring(0, 12)}
+                        </span>
+                        <button 
+                          class="text-xs hover:text-purple-500 transition-colors p-1"
+                          title="Copy Full Container ID"
+                          on:click={async () => {
+                            try {
+                              if (serviceStatus.containerId) {
+                                await navigator.clipboard.writeText(serviceStatus.containerId);
+                                console.log('Container ID copied to clipboard');
+                              }
+                            } catch (err) {
+                              console.error('Failed to copy container ID:', err);
+                            }
+                          }}>
+                          {@html renderIcon(faCopy, 'text-xs')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              {/if}
+              
+              <div class="space-y-3">
+                <h4 class="text-sm font-medium text-[var(--pd-content-sub)] uppercase tracking-wider">Service Management</h4>
+                
+                <div class="space-y-2 text-sm text-[var(--pd-content-sub)]">
+                  {#if activeServiceTab === 'rhdh'}
+                    <p>Main RHDH service providing the Developer Hub interface.</p>
+                  {:else if activeServiceTab === 'postgresql'}
+                    <p>Database service for RHDH data persistence.</p>
+                  {:else if activeServiceTab === 'install-dynamic-plugins'}
+                    <p>Service for installing and managing dynamic plugins.</p>
+                  {:else}
+                    <p>Service component of the RHDH Local deployment.</p>
+                  {/if}
+                </div>
+              </div>
+            </div>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Last Updated -->
+      <div class="text-center text-sm text-[var(--pd-content-sub)]">
+        Last updated: {status.lastUpdated.toLocaleString()}
+      </div>
+    </div>
+  {/if}
+</div>

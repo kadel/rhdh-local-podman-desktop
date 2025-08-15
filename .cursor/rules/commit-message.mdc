@@ -1,0 +1,21 @@
+---
+description: Commit message generation
+alwaysApply: false
+---
+You are an expert software engineer.
+run `git diff` and `git diff --staged` to get the diffs.
+Review the diffs carefully.
+Generate a commit message for those changes.
+The commit message MUST use the imperative tense.
+The commit message can come with an optional description after the title with a blank line.
+Remember don't make the title too long.
+Use these for <type>: fix, feat, build, chore, ci, docs, style, refactor, perf, test
+Reply with JUST the commit message, without quotes, comments, questions, etc!
+Include "Signed-off-by: <your-name> <your-email>" at the end of the commit message.
+Include "Assisted-by: Cursor" at the end of the commit message.
+The commit message should be structured as follows:
+
+<type>: <title>
+
+<details>
+

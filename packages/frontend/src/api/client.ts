@@ -1,4 +1,4 @@
-import type { HelloWorldApi } from '/@shared/src/HelloWorldApi';
+import type { RHDHLocalApi } from '/@shared/src/RHDHLocalApi';
 import { RpcBrowser } from '/@shared/src/messages/MessageProxy';
 
 /**
@@ -11,7 +11,7 @@ export interface RouterState {
 }
 const podmanDesktopApi = acquirePodmanDesktopApi();
 export const rpcBrowser: RpcBrowser = new RpcBrowser(window, podmanDesktopApi);
-export const helloWorldClient: HelloWorldApi = rpcBrowser.getProxy<HelloWorldApi>();
+export const rhdhLocalClient: RHDHLocalApi = rpcBrowser.getProxy<RHDHLocalApi>();
 
 // The below code is used to save the state of the router in the podmanDesktopApi, so
 // that we can determine the correct route to display when the extension is reloaded.

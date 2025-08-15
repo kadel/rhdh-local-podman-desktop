@@ -1,7 +1,7 @@
 {
-  "name": "frontend",
-  "displayName": "frontend UI",
-  "description": "Frontend UI for the Hello World extension",
+  "name": "rhdh-local-frontend",
+  "displayName": "RHDH Local Frontend",
+  "description": "Frontend UI for the RHDH Local extension",
   "version": "1.4.0-next",
   "type": "module",
   "scripts": {

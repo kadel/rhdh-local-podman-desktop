@@ -3,14 +3,14 @@
  * This includes repository management, lifecycle operations, and configuration handling.
  */
 
-export interface RHDHConfig {
+export interface InstanceConfig {
   repoPath: string;
   repoUrl: string;
   rhdhUrl: string;
 }
 
 export interface RHDHServiceStatus {
-  status: 'running' | 'stopped' | 'error' | 'unknown';
+  status: 'running' | 'stopped' | 'not-used' | 'error' | 'unknown';
   containerId?: string;
   uptime?: string;
 }
@@ -18,11 +18,7 @@ export interface RHDHServiceStatus {
 export interface RHDHStatus {
   isRunning: boolean;
   isInstalled: boolean; // Whether rhdh-local repo exists
-  services: {
-    rhdh: RHDHServiceStatus;
-    'install-dynamic-plugins': RHDHServiceStatus;
-    postgresql: RHDHServiceStatus;
-  };
+  services: { [serviceName: string]: RHDHServiceStatus };
   url?: string; // http://localhost:7007 when running
   repoPath?: string; // Path to cloned rhdh-local repo
   lastUpdated: Date;
@@ -56,26 +52,20 @@ export interface ConfigurationFile {
 export abstract class RHDHLocalApi {
   // Installation and setup
   abstract checkInstallation(): Promise<InstallationCheck>;
-  abstract cloneRepository(targetPath?: string): Promise<void>;
+  abstract cloneRepository(): Promise<void>;
   abstract updateRepository(): Promise<void>; // git pull
-  abstract setupEnvironment(): Promise<void>; // cp env.sample .env if needed
+  abstract setupConfigFiles(): Promise<void>; // cp env.sample .env if needed
 
   // Lifecycle management
   abstract getStatus(): Promise<RHDHStatus>;
-  abstract start(): Promise<void>; // podman-compose up -d
-  abstract stop(): Promise<void>; // podman-compose down
+  abstract start(): Promise<void>; // docker-compose up -d
+  abstract stop(): Promise<void>; // docker-compose down
   abstract restart(): Promise<void>; // stop + start
   abstract restartService(serviceName: string): Promise<void>; // restart specific service
 
   // Service management
   abstract installPlugins(): Promise<void>; // run install-dynamic-plugins
   abstract getLogs(service: string, lines?: number): Promise<RHDHLogs>;
-  abstract getServiceStatus(serviceName: string): Promise<RHDHServiceStatus>;
-
-  // Configuration management
-  abstract getConfiguration(configType: ConfigurationType): Promise<ConfigurationFile>;
-  abstract updateConfiguration(configType: ConfigurationType, content: string): Promise<void>;
-  abstract validateConfiguration(configType: ConfigurationType, content: string): Promise<{ valid: boolean; errors: string[] }>;
 
   // Repository management
   abstract getGitStatus(): Promise<{ branch: string; commit: string; isDirty: boolean; unpulledCommits: number }>;
@@ -84,7 +74,6 @@ export abstract class RHDHLocalApi {
 
   // Utilities
   abstract openRHDHInBrowser(): Promise<void>;
-  abstract openRepositoryInTerminal(): Promise<void>;
-  abstract getDefaultConfiguration(): Promise<RHDHConfig>;
-  abstract exportLogs(): Promise<string>; // Export all logs to a file
+  abstract openExternalUrl(url: string): Promise<void>;
+  abstract getInstanceConfig(): Promise<InstanceConfig>;
 }

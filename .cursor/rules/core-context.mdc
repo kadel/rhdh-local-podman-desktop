@@ -29,7 +29,7 @@ monorepo/
 - **Frontend**: Svelte 5, TypeScript, TailwindCSS, @podman-desktop/ui-svelte
 - **Build**: Vite, Vitest for testing
 - **Communication**: RPC-based message passing via MessageProxy
-- **Process Execution**: `podmanDesktopApi.process.exec` for `podman-compose` commands
+- **Process Execution**: `podmanDesktopApi.process.exec` for `docker-compose` commands
 - **Storage**: `extensionContext.storagePath` for repository and configuration storage
 
 ## RHDH Local Workflow Understanding
@@ -43,13 +43,13 @@ RHDH Local is a git repository containing:
 
 ### Essential Workflow:
 1. **Setup**: `git clone https://github.com/redhat-developer/rhdh-local.git && cp env.sample .env`
-2. **Start**: `podman-compose up -d`
+2. **Start**: `docker-compose up -d --wait`
 3. **Access**: `http://localhost:7007`
 4. **Config Changes**: 
    - `app-config.local.yaml` → restart rhdh service
    - `dynamic-plugins.override.yaml` → run install-dynamic-plugins + restart rhdh
    - `users.override.yaml` or `components.override.yaml` → restart rhdh
-5. **Stop**: `podman-compose down`
+5. **Stop**: `docker-compose down`
 
 ## Extension Storage Pattern
 Always use `extensionContext.storagePath` for data storage:
@@ -90,8 +90,8 @@ export abstract class RHDHLocalApi {
   
   // Lifecycle management
   abstract getStatus(): Promise<RHDHStatus>;
-  abstract start(): Promise<void>; // podman-compose up -d
-  abstract stop(): Promise<void>; // podman-compose down  
+  abstract start(): Promise<void>; // docker-compose up -d
+  abstract stop(): Promise<void>; // docker-compose down  
   abstract restart(): Promise<void>; // stop + start
   
   // Service management
@@ -110,6 +110,7 @@ export abstract class RHDHLocalApi {
 ### Implementation hints
 - use `extensionContext.storagePath` for storing rhdh-local repository clone and configuration
 - use `podmanDesktopApi.process.exec` for running `podman compose` and `git` commands
+- use `docker-compose` binary provided by Podman Desktop Compose extension
 
 ### Error Handling Standards
 - Always provide user-friendly error messages via `podmanDesktopApi.window.showErrorMessage`

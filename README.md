@@ -1,29 +1,37 @@
-# Podman Desktop Extension Full Template
+# RHDH Local Podman Desktop Extension
 
 <p align="center">
-  <img alt="Hello World" src="/images/helloselkie.png" width="50%">
+  <img alt="RHDH Local" src="/images/helloselkie.png" width="50%">
 </p>
 
 ## Overview
 
-This template provides a "full" example of creating an extension with a webview that utilizes multiple packages. Within this template, we use three separate packages to distinguish between the frontend, backend, and shared code that connects the frontend and backend.
+This is a Podman Desktop Extension for managing Red Hat Developer Hub Local (rhdh-local) instances. The extension provides a comprehensive interface for cloning, configuring, and managing RHDH Local deployments using Podman Compose.
 
-The "full" template is meant to showcase a full production example which includes multiple frontend and backend technologies such as TypeScript, Svelte and TailwindCSS.
+The extension is built using multiple packages to distinguish between the frontend, backend, and shared code that connects the frontend and backend, following Podman Desktop extension best practices.
 
-All backend-related code can be separated into its own package, which improves both security and code organization.
+**Key Features:**
+- **Repository Management**: Clone and update the rhdh-local repository
+- **Lifecycle Management**: Start, stop, and restart RHDH Local services
+- **Configuration Management**: Edit RHDH configuration files through the UI
+- **Service Monitoring**: Real-time status monitoring of all services
+- **Tray Integration**: Quick access controls via system tray
 
-The template offers flexibility in creating a Podman Desktop extension that can use the underlying Podman Desktop API and pre-built UI components via [@podman-desktop/ui-svelte](https://www.npmjs.com/package/@podman-desktop/ui-svelte).
+The extension leverages the Podman Desktop API and pre-built UI components via [@podman-desktop/ui-svelte](https://www.npmjs.com/package/@podman-desktop/ui-svelte).
 
-With this template, it's as easy as:
-* **Backend:** Write 100% TypeScript code.
-* **Frontend:** Use Svelte & pre-made UI components from Podman Desktop for rapid UI development.
+**Architecture:**
+* **Backend:** TypeScript-based API implementation with comprehensive RHDH Local management
+* **Frontend:** Svelte-based UI with pre-made Podman Desktop components
+* **Shared:** RPC-based communication layer between frontend and backend
 
-Tips for using this template:
-* Every section is heavily commented to aid understanding. Start with the `backend`, then move on to the `frontend`, and finally explore the `shared` package.
-* Adding a new function to connect the frontend and backend requires updates to both `packages/backend/src/api-impl.ts` and `packages/shared/src/HelloWorldApi.ts`.
+**RHDH Local Integration:**
+* Manages the [rhdh-local repository](https://github.com/redhat-developer/rhdh-local) 
+* Uses docker-compose provided by Podman Desktop Compose extension for container orchestration
+* Handles configuration files: `app-config.local.yaml`, `dynamic-plugins.override.yaml`, `.env`
+* Provides tray menu integration for quick access
 
-![hello world](/images/helloworld.png)
-![hello world notification](/images/helloworld_notification.png)
+![RHDH Local Management](/images/helloworld.png)
+![Status Notifications](/images/helloworld_notification.png)
 
 ## Tech Stack
 
@@ -36,11 +44,11 @@ The tech stack for this extension template includes:
 
 ## Architecture
 
-The template is organized into three packages:
+The extension is organized into three packages:
 
-* `packages/frontend`: A Svelte/Tailwind-based frontend designed for easy integration with the Podman Desktop official [@podman-desktop/ui-svelte](https://www.npmjs.com/package/@podman-desktop/ui-svelte) package.
-* `packages/backend`: The backend code and central configuration area for the extension, managed within `package.json`.
-* `packages/shared`: Intermediary code that creates a connection between the frontend and backend via an RPC connection.
+* `packages/frontend`: A Svelte/Tailwind-based UI for RHDH Local management, built with [@podman-desktop/ui-svelte](https://www.npmjs.com/package/@podman-desktop/ui-svelte) components.
+* `packages/backend`: The backend API implementation with RHDH Local integration, repository management, and system tray functionality.
+* `packages/shared`: RPC-based communication layer defining the RHDH Local API interface between frontend and backend.
 
 ## Development
 
@@ -48,7 +56,7 @@ To build and develop the extension, follow these steps:
 
 1. Clone the project or your fork:
 ```sh
-$ git clone https://github.com/containers/podman-desktop-extension-template-webview/
+$ git clone https://github.com/redhat-developer/rhdh-local-podman-desktop
 ```
 
 2. Run `npm install` to install all relevant packages:
@@ -109,7 +117,7 @@ We will load the extension within Podman Desktop to test it. This requires Podma
 
 5. Confirm that the extension has been loaded:
 
-You will now see a "Hello World" webview in the Podman Desktop navbar. You can also check the developer console for any logging information indicating that the extension has been loaded successfully.
+You will now see a "RHDH Local" webview in the Podman Desktop navbar. The extension will also add tray menu items for quick access to RHDH Local management functions. Check the developer console for any logging information indicating that the extension has been loaded successfully.
 
 Example of extension loading:
 
