@@ -45,6 +45,13 @@ let actionLoading: { [key: string]: boolean } = {};
 // Tab state for services
 let activeServiceTab: string = '';
 
+// Log streaming state
+let streamingIntervals: { [serviceName: string]: NodeJS.Timeout } = {};
+let streamingLogs: { [serviceName: string]: boolean } = {};
+let logLines: { [serviceName: string]: string[] } = {};
+let showLogs: { [serviceName: string]: boolean } = {};
+let lastLogTimestamp: { [serviceName: string]: Date } = {};
+
 onMount(() => {
   loadStatus();
   // Auto-refresh every 10 seconds
@@ -55,6 +62,10 @@ onDestroy(() => {
   if (refreshInterval) {
     clearInterval(refreshInterval);
   }
+  // Clean up all streaming intervals
+  Object.values(streamingIntervals).forEach(interval => {
+    clearInterval(interval);
+  });
 });
 
 async function loadStatus() {
@@ -93,6 +104,123 @@ async function performAction(actionName: string, action: () => Promise<void>) {
   } finally {
     actionLoading[actionName] = false;
   }
+}
+
+async function startLogStream(serviceName: string) {
+  try {
+    // Stop existing stream if any
+    if (streamingIntervals[serviceName]) {
+      stopLogStream(serviceName);
+    }
+
+    actionLoading[`logs-${serviceName}`] = true;
+    
+    // Trigger Svelte reactivity for all state changes
+    streamingLogs = { ...streamingLogs, [serviceName]: true };
+    logLines = { ...logLines, [serviceName]: [] };
+    showLogs = { ...showLogs, [serviceName]: true };
+
+    // Initial log fetch
+    await fetchLogs(serviceName);
+
+    // Set up polling interval for new logs
+    const interval = setInterval(async () => {
+      if (streamingLogs[serviceName]) {
+        await fetchLogs(serviceName);
+      } else {
+        clearInterval(interval);
+        delete streamingIntervals[serviceName];
+      }
+    }, 3000); // Poll every 3 seconds
+
+    streamingIntervals[serviceName] = interval;
+
+  } catch (err) {
+    console.error(`Failed to start log stream for ${serviceName}:`, err);
+    streamingLogs = { ...streamingLogs, [serviceName]: false };
+    error = err instanceof Error ? err.message : 'Unknown error';
+  } finally {
+    actionLoading[`logs-${serviceName}`] = false;
+  }
+}
+
+async function fetchLogs(serviceName: string) {
+  try {
+    console.log(`[UI] Fetching logs for ${serviceName}...`);
+    
+    const logResponse = await rhdhLocalClient.getStreamingLogs(serviceName, {
+      follow: true,
+      tail: 100,
+      timestamps: true
+    });
+
+    console.log(`[UI] Received log response for ${serviceName}:`, {
+      logsLength: logResponse.logs?.length || 0,
+      hasMore: logResponse.hasMore,
+      error: logResponse.error,
+      timestamp: logResponse.timestamp
+    });
+
+    if (logResponse.error) {
+      console.error(`Log fetch error for ${serviceName}:`, logResponse.error);
+      // Still show the error message in logs
+    }
+
+    if (logResponse.logs) {
+      // Split data into lines and filter out empty ones
+      const newLines = logResponse.logs.split('\n').filter(line => line.trim());
+      console.log(`[UI] Processing ${newLines.length} log lines for ${serviceName}`);
+      
+      if (newLines.length > 0) {
+        const currentLines = logLines[serviceName] || [];
+        
+        // Simple deduplication: if this looks like the same log set, don't duplicate
+        const isNewData = !lastLogTimestamp[serviceName] || 
+                          logResponse.timestamp > lastLogTimestamp[serviceName] ||
+                          currentLines.length === 0;
+        
+        if (isNewData) {
+          const updatedLines = [...currentLines, ...newLines].slice(-500);
+          
+          // Trigger Svelte reactivity
+          logLines = { ...logLines, [serviceName]: updatedLines };
+          lastLogTimestamp = { ...lastLogTimestamp, [serviceName]: logResponse.timestamp };
+          
+          console.log(`[UI] Updated ${serviceName} logs, total lines:`, updatedLines.length);
+          
+          // Auto-scroll to bottom
+          setTimeout(() => {
+            const logContainer = document.getElementById(`log-container-${serviceName}`);
+            if (logContainer) {
+              logContainer.scrollTop = logContainer.scrollHeight;
+            }
+          }, 50);
+        } else {
+          console.log(`[UI] Skipping duplicate log data for ${serviceName}`);
+        }
+      }
+    }
+
+  } catch (err) {
+    console.error(`Failed to fetch logs for ${serviceName}:`, err);
+    // Add error message to logs
+    const errorLine = `[${new Date().toISOString()}] Error fetching logs: ${err instanceof Error ? err.message : 'Unknown error'}`;
+    const currentLines = logLines[serviceName] || [];
+    logLines = { ...logLines, [serviceName]: [...currentLines, errorLine].slice(-500) };
+  }
+}
+
+function stopLogStream(serviceName: string) {
+  if (streamingIntervals[serviceName]) {
+    clearInterval(streamingIntervals[serviceName]);
+    delete streamingIntervals[serviceName];
+  }
+  streamingLogs = { ...streamingLogs, [serviceName]: false };
+  console.log(`[UI] Stopped log streaming for ${serviceName}`);
+}
+
+function toggleLogs(serviceName: string) {
+  showLogs = { ...showLogs, [serviceName]: !showLogs[serviceName] };
 }
 
 function getServiceIcon(serviceName: string) {
@@ -458,22 +586,51 @@ function renderIcon(icon: any, className: string = '') {
                   </Button>
                 {/if}
                 
-                <Button 
-                  size="sm"
-                  on:click={() => performAction(`logs-${activeServiceTab}`, async () => {
-                    const logs = await rhdhLocalClient.getLogs(activeServiceTab, 100);
-                    console.log(`${activeServiceTab} logs:`, logs);
-                    // TODO: Show logs in modal or new view
-                  })}
-                  disabled={actionLoading[`logs-${activeServiceTab}`]}
-                  title="View Logs">
-                  {#if actionLoading[`logs-${activeServiceTab}`]}
-                    {@html renderIcon(faSpinner, 'animate-spin mr-2')}
-                  {:else}
+                {#if streamingLogs[activeServiceTab]}
+                  <Button 
+                    size="sm"
+                    on:click={() => {
+                      stopLogStream(activeServiceTab);
+                      showLogs = { ...showLogs, [activeServiceTab]: false };
+                    }}
+                    disabled={actionLoading[`logs-${activeServiceTab}`]}
+                    title="Stop Log Stream"
+                    class="bg-red-500 hover:bg-red-600">
+                    {@html renderIcon(faStop, 'mr-2')}
+                    Stop Logs
+                  </Button>
+                {:else}
+                  <Button 
+                    size="sm"
+                    on:click={() => startLogStream(activeServiceTab)}
+                    disabled={actionLoading[`logs-${activeServiceTab}`] || !serviceStatus.containerId}
+                    title={serviceStatus.containerId ? "Stream Live Logs" : "No container available for log streaming"}>
+                    {#if actionLoading[`logs-${activeServiceTab}`]}
+                      {@html renderIcon(faSpinner, 'animate-spin mr-2')}
+                    {:else}
+                      {@html renderIcon(faEye, 'mr-2')}
+                    {/if}
+                    Stream Logs
+                  </Button>
+                {/if}
+                
+                {#if showLogs[activeServiceTab] && logLines[activeServiceTab]?.length > 0}
+                  <Button 
+                    size="sm"
+                    on:click={() => toggleLogs(activeServiceTab)}
+                    title="Toggle Log Visibility">
+                    {@html renderIcon(faTimes, 'mr-2')}
+                    Hide Logs
+                  </Button>
+                {:else if logLines[activeServiceTab]?.length > 0}
+                  <Button 
+                    size="sm"
+                    on:click={() => toggleLogs(activeServiceTab)}
+                    title="Show Logs">
                     {@html renderIcon(faEye, 'mr-2')}
-                  {/if}
-                  View Logs
-                </Button>
+                    Show Logs
+                  </Button>
+                {/if}
               </div>
             </div>
             
@@ -550,6 +707,65 @@ function renderIcon(icon: any, className: string = '') {
                 </div>
               </div>
             </div>
+            
+            <!-- Log Display Area - Always show when streaming is active or logs exist -->
+            {#if streamingLogs[activeServiceTab] || (showLogs[activeServiceTab] && logLines[activeServiceTab]?.length > 0)}
+              <div class="mt-6">
+                <div class="flex items-center justify-between mb-3">
+                  <h4 class="text-sm font-medium text-[var(--pd-content-sub)] uppercase tracking-wider">
+                    Service Logs
+                    {#if streamingLogs[activeServiceTab]}
+                      <span class="ml-2 text-green-500 text-xs">● LIVE</span>
+                    {/if}
+                  </h4>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-[var(--pd-content-sub)]">
+                      {logLines[activeServiceTab]?.length || 0} lines
+                    </span>
+                    <Button 
+                      size="sm"
+                      on:click={() => {
+                        // Trigger Svelte reactivity by reassigning the whole object
+                        logLines = { ...logLines, [activeServiceTab]: [] };
+                      }}
+                      title="Clear Logs">
+                      {@html renderIcon(faTimes, 'text-xs')}
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+                
+                <div class="bg-gray-900 text-green-400 rounded-lg p-4 max-h-96 overflow-auto font-mono text-sm border" id="log-container-{activeServiceTab}">
+                  {#if logLines[activeServiceTab]?.length > 0}
+                    {#each logLines[activeServiceTab] as line, index}
+                      <div class="whitespace-pre-wrap break-words leading-tight mb-1">
+                        {line.trim()}
+                      </div>
+                    {/each}
+                  {:else}
+                    <div class="text-gray-500 text-center py-8">
+                      {#if streamingLogs[activeServiceTab]}
+                        <div class="flex flex-col items-center gap-2">
+                          {@html renderIcon(faSpinner, 'animate-spin text-lg mb-2')}
+                          <p>Waiting for logs...</p>
+                          <p class="text-xs">Streaming from {activeServiceTab} service</p>
+                          <p class="text-xs mt-2">Debug: Stream active = {streamingLogs[activeServiceTab]}</p>
+                        </div>
+                      {:else}
+                        <p>No logs available</p>
+                      {/if}
+                    </div>
+                  {/if}
+                  
+                  {#if streamingLogs[activeServiceTab]}
+                    <div class="flex items-center gap-2 text-blue-400 mt-2 pt-2 border-t border-gray-700">
+                      {@html renderIcon(faSpinner, 'animate-spin text-xs')}
+                      <span class="text-xs">Streaming logs from {activeServiceTab}...</span>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            {/if}
           </div>
         {/if}
       </div>

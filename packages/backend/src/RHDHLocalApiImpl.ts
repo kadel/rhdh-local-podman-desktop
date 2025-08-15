@@ -7,6 +7,8 @@ import type {
   InstanceConfig,
   RHDHStatus,
   RHDHLogs,
+  LogStreamResponse,
+  LogStreamOptions,
   InstallationCheck,
   ConfigurationType,
   ConfigurationFile,
@@ -487,6 +489,34 @@ includes:
       };
     } catch (error) {
       throw new Error(`Failed to get logs for service ${service}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  async getStreamingLogs(service: string, options: LogStreamOptions = {}): Promise<LogStreamResponse> {
+    if (!(await this.isRepositoryInstalled())) {
+      throw new Error('Repository not installed. Please clone it first.');
+    }
+
+    try {
+      // Get current logs with specified number of lines
+      const logs = await this.getLogs(service, options.tail || 100);
+      
+      console.log(`[STREAM] Fetched logs for ${service}, length: ${logs.logs?.length || 0}`);
+      
+      return {
+        logs: logs.logs || '',
+        hasMore: true, // Assume there might be more logs
+        timestamp: logs.timestamp,
+      };
+    } catch (error) {
+      console.error(`[STREAM] Failed to get logs for ${service}:`, error);
+      
+      return {
+        logs: `[${new Date().toISOString()}] Error fetching logs: ${error instanceof Error ? error.message : 'Unknown error'}\n`,
+        hasMore: false,
+        timestamp: new Date(),
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
     }
   }
 

@@ -32,6 +32,19 @@ export interface RHDHLogs {
   timestamp: Date;
 }
 
+export interface LogStreamOptions {
+  follow?: boolean;
+  tail?: number;
+  timestamps?: boolean;
+}
+
+export interface LogStreamResponse {
+  logs: string;
+  hasMore: boolean;
+  timestamp: Date;
+  error?: string;
+}
+
 export interface InstallationCheck {
   installed: boolean;
   path?: string;
@@ -66,6 +79,7 @@ export abstract class RHDHLocalApi {
   // Service management
   abstract installPlugins(): Promise<void>; // run install-dynamic-plugins
   abstract getLogs(service: string, lines?: number): Promise<RHDHLogs>;
+  abstract getStreamingLogs(service: string, options?: LogStreamOptions): Promise<LogStreamResponse>;
 
   // Repository management
   abstract getGitStatus(): Promise<{ branch: string; commit: string; isDirty: boolean; unpulledCommits: number }>;
