@@ -707,6 +707,14 @@ function getLanguageForConfig(configType: ConfigurationType): string {
                         <span class="text-xs text-[var(--pd-content-sub)]">
                           {configContents[configType]?.split('\n').length || 0} lines
                         </span>
+                        <button 
+                          class="text-xs hover:text-purple-500 transition-colors flex items-center gap-1"
+                          title="Refresh from filesystem"
+                          disabled={configLoading[configType]}
+                          on:click={() => loadConfiguration(configType)}>
+                          {@html renderIcon(faRefresh, 'text-xs')}
+                          <span>Refresh</span>
+                        </button>
                         {#if configFiles[configType]?.path}
                           <button 
                             class="text-xs hover:text-purple-500 transition-colors"
