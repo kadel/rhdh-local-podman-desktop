@@ -33,7 +33,7 @@ jobs:
         id: publish-image
         run: |
           IMAGE_NAME_GHCR=ghcr.io/${{ github.repository_owner }}/podman-desktop-extension-rhdh-local:dev
-          IMAGE_NAME_QUAY=quay.io/${{ secrets.QUAY_USERNAME }}/podman-desktop-extension-rhdh-local:dev
+          IMAGE_NAME_QUAY=quay.io/tkral/podman-desktop-extension-rhdh-local:dev
           
           podman build -t podman-desktop-extension-rhdh-local:dev .
           
