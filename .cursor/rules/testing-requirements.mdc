@@ -1,74 +1,503 @@
 ---
 description: Testing requirements and patterns using Vitest and Testing Library
-globs: ["**/*.test.ts", "**/*.spec.ts", "**/__tests__/**"]
+globs: ["**/*.test.ts", "**/*.spec.ts", "**/__tests__/**", "**/vitest.config.js"]
 alwaysApply: false
 ---
 
-# Testing Requirements
+# Testing Requirements and Patterns
 
-## Testing Framework
-- Use Vitest for all unit and integration tests
-- Use `@testing-library/svelte` for component testing
-- Mock Podman Desktop API calls using provided `__mocks__` directory
-- Aim for comprehensive test coverage of business logic
+## Testing Stack
+- **Test Runner**: Vitest
+- **Component Testing**: @testing-library/svelte
+- **Mocking**: Vitest mocks + __mocks__ directory
+- **Coverage**: Vitest coverage with lcov reporter
 
-## Test Structure
+## Test Configuration
+
+### Vitest Config (vitest.config.js)
+```javascript
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./test/setup.ts'],
+    coverage: {
+      reporter: ['text', 'lcov', 'html'],
+      exclude: [
+        'node_modules/',
+        'test/',
+        '*.config.js',
+        '**/*.d.ts',
+      ],
+    },
+    mockReset: true,
+    restoreMocks: true,
+  },
+});
+```
+
+## API Testing Patterns
+
+### Backend API Testing
 ```typescript
-// Unit test example
-import { describe, it, expect, vi } from 'vitest';
-import { rhdlLocalApi } from '../src/api-impl';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { RHDHLocalApiImpl } from '../src/RHDHLocalApiImpl';
+import * as podmanDesktopApi from '@podman-desktop/api';
 
-describe('RHDHLocalApi', () => {
+// Mock the entire API module
+vi.mock('@podman-desktop/api');
+
+describe('RHDHLocalApiImpl', () => {
+  let api: RHDHLocalApiImpl;
+  let mockContext: podmanDesktopApi.ExtensionContext;
+  
   beforeEach(() => {
+    // Setup mock context
+    mockContext = {
+      storagePath: '/test/storage',
+      subscriptions: [],
+      extensionPath: '/test/extension',
+      extensionUri: { scheme: 'file', path: '/test/extension' },
+      // ... other required properties
+    };
+    
+    api = new RHDHLocalApiImpl(mockContext);
     vi.clearAllMocks();
   });
-
-  it('should start rhdh-local successfully', async () => {
-    // Mock the process.exec call
-    const mockExec = vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
-    vi.mocked(podmanDesktopApi.process.exec).mockImplementation(mockExec);
-
-    const api = new rhdlLocalApi(mockContext);
-    await api.start();
-
-    expect(mockExec).toHaveBeenCalledWith('podman', ['compose', 'up', '-d'], { cwd: expect.any(String) });
+  
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  
+  describe('checkInstallation', () => {
+    it('should detect when git is not available', async () => {
+      vi.mocked(podmanDesktopApi.process.exec)
+        .mockRejectedValue(new Error('Command not found'));
+      
+      const result = await api.checkInstallation();
+      
+      expect(result.gitAvailable).toBe(false);
+      expect(result.issues).toContain('Git is not available. Please install Git to use this extension.');
+    });
+    
+    it('should detect when repository is installed', async () => {
+      // Mock git and docker-compose as available
+      vi.mocked(podmanDesktopApi.process.exec)
+        .mockResolvedValue({ stdout: 'git version 2.x', stderr: '' });
+      
+      // Mock file system checks
+      vi.spyOn(fs.promises, 'access').mockResolvedValue(undefined);
+      
+      const result = await api.checkInstallation();
+      
+      expect(result.installed).toBe(true);
+      expect(result.gitAvailable).toBe(true);
+      expect(result.podmanComposeAvailable).toBe(true);
+    });
+  });
+  
+  describe('getStatus', () => {
+    it('should parse docker-compose ps output correctly', async () => {
+      const mockOutput = JSON.stringify({
+        Service: 'rhdh',
+        State: 'running',
+        ID: 'abc123',
+        Status: 'Up 2 minutes'
+      });
+      
+      vi.mocked(podmanDesktopApi.process.exec)
+        .mockResolvedValue({ stdout: mockOutput, stderr: '' });
+      
+      const status = await api.getStatus();
+      
+      expect(status.isRunning).toBe(true);
+      expect(status.services.rhdh).toEqual({
+        status: 'running',
+        containerId: 'abc123',
+        uptime: 'Up 2 minutes'
+      });
+    });
+    
+    it('should handle docker-compose errors gracefully', async () => {
+      vi.mocked(podmanDesktopApi.process.exec)
+        .mockRejectedValue(new Error('docker-compose not found'));
+      
+      const status = await api.getStatus();
+      
+      expect(status.isRunning).toBe(false);
+      expect(status.services).toEqual({});
+    });
   });
 });
 ```
 
-## Component Testing
+### Service Lifecycle Testing
 ```typescript
-// Component test example
-import { render, fireEvent } from '@testing-library/svelte';
-import { describe, it, expect, vi } from 'vitest';
-import RHDHControls from '../src/RHDHControls.svelte';
-
-describe('RHDHControls', () => {
-  it('should call start when start button is clicked', async () => {
-    const mockStart = vi.fn();
-    const { getByRole } = render(RHDHControls, { onStart: mockStart });
+describe('Service Management', () => {
+  it('should start services with correct command', async () => {
+    const mockExec = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
+    vi.mocked(podmanDesktopApi.process.exec).mockImplementation(mockExec);
     
-    await fireEvent.click(getByRole('button', { name: 'Start' }));
-    expect(mockStart).toHaveBeenCalled();
+    await api.start();
+    
+    expect(mockExec).toHaveBeenCalledWith(
+      expect.stringContaining('docker-compose'),
+      ['up', '-d', '--wait'],
+      { cwd: expect.stringContaining('rhdh-local') }
+    );
+  });
+  
+  it('should stop services correctly', async () => {
+    const mockExec = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
+    vi.mocked(podmanDesktopApi.process.exec).mockImplementation(mockExec);
+    
+    await api.stop();
+    
+    expect(mockExec).toHaveBeenCalledWith(
+      expect.stringContaining('docker-compose'),
+      ['down'],
+      { cwd: expect.stringContaining('rhdh-local') }
+    );
+  });
+  
+  it('should restart specific service', async () => {
+    const mockExec = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
+    vi.mocked(podmanDesktopApi.process.exec).mockImplementation(mockExec);
+    
+    await api.restartService('rhdh');
+    
+    expect(mockExec).toHaveBeenCalledWith(
+      expect.stringContaining('docker-compose'),
+      ['restart', 'rhdh'],
+      { cwd: expect.stringContaining('rhdh-local') }
+    );
+  });
+});
+```
+
+## Component Testing Patterns
+
+### Svelte Component Testing
+```typescript
+import { render, fireEvent, waitFor, screen } from '@testing-library/svelte';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import RHDHLocal from '../src/RHDHLocal.svelte';
+import { rhdhLocalClient } from '../src/api/client';
+
+// Mock the API client
+vi.mock('../src/api/client', () => ({
+  rhdhLocalClient: {
+    getStatus: vi.fn(),
+    checkInstallation: vi.fn(),
+    start: vi.fn(),
+    stop: vi.fn(),
+    getConfiguration: vi.fn(),
+    updateConfiguration: vi.fn(),
+  }
+}));
+
+describe('RHDHLocal Component', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  
+  it('should display loading state initially', () => {
+    vi.mocked(rhdhLocalClient.getStatus).mockImplementation(
+      () => new Promise(() => {}) // Never resolves
+    );
+    
+    const { getByText } = render(RHDHLocal);
+    expect(getByText('Loading...')).toBeInTheDocument();
+  });
+  
+  it('should display not installed state', async () => {
+    vi.mocked(rhdhLocalClient.getStatus).mockResolvedValue({
+      isInstalled: false,
+      isRunning: false,
+      services: {},
+      lastUpdated: new Date(),
+    });
+    
+    vi.mocked(rhdhLocalClient.checkInstallation).mockResolvedValue({
+      installed: false,
+      gitAvailable: true,
+      podmanComposeAvailable: true,
+      issues: [],
+    });
+    
+    const { getByText } = render(RHDHLocal);
+    
+    await waitFor(() => {
+      expect(getByText('RHDH Local Not Installed')).toBeInTheDocument();
+      expect(getByText('Clone Repository')).toBeInTheDocument();
+    });
+  });
+  
+  it('should handle start button click', async () => {
+    vi.mocked(rhdhLocalClient.getStatus).mockResolvedValue({
+      isInstalled: true,
+      isRunning: false,
+      services: {},
+      lastUpdated: new Date(),
+    });
+    
+    vi.mocked(rhdhLocalClient.start).mockResolvedValue();
+    
+    const { getByRole } = render(RHDHLocal);
+    
+    await waitFor(() => {
+      const startButton = getByRole('button', { name: /start/i });
+      expect(startButton).toBeInTheDocument();
+    });
+    
+    const startButton = getByRole('button', { name: /start/i });
+    await fireEvent.click(startButton);
+    
+    expect(rhdhLocalClient.start).toHaveBeenCalled();
+  });
+});
+```
+
+### Testing User Interactions
+```typescript
+describe('Configuration Editor', () => {
+  it('should validate YAML syntax', async () => {
+    const invalidYaml = 'invalid: yaml: content:';
+    
+    const { getByRole, getByText } = render(ConfigEditor, {
+      props: {
+        configType: 'app-config',
+        initialContent: 'valid: yaml',
+      }
+    });
+    
+    const editor = getByRole('textbox');
+    await fireEvent.input(editor, { target: { value: invalidYaml } });
+    
+    await waitFor(() => {
+      expect(getByText(/Invalid YAML/)).toBeInTheDocument();
+    });
+  });
+  
+  it('should save valid configuration', async () => {
+    const validYaml = 'app:\n  title: Test';
+    vi.mocked(rhdhLocalClient.updateConfiguration).mockResolvedValue();
+    
+    const { getByRole, getByText } = render(ConfigEditor, {
+      props: {
+        configType: 'app-config',
+        initialContent: '',
+      }
+    });
+    
+    const editor = getByRole('textbox');
+    await fireEvent.input(editor, { target: { value: validYaml } });
+    
+    const saveButton = getByRole('button', { name: /save/i });
+    await fireEvent.click(saveButton);
+    
+    expect(rhdhLocalClient.updateConfiguration).toHaveBeenCalledWith(
+      'app-config',
+      validYaml
+    );
   });
 });
 ```
 
 ## Mocking Patterns
-- Mock all `podmanDesktopApi` calls in tests
-- Test both success and error scenarios
-- Mock file system operations when testing configuration management
-- Use proper cleanup in test teardown
+
+### File System Mocking
+```typescript
+import * as fs from 'node:fs';
+
+vi.mock('node:fs', () => ({
+  promises: {
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    mkdir: vi.fn(),
+    access: vi.fn(),
+    stat: vi.fn(),
+    copyFile: vi.fn(),
+  }
+}));
+
+describe('Configuration Management', () => {
+  it('should read configuration file', async () => {
+    const mockContent = 'app:\n  title: Test';
+    vi.mocked(fs.promises.readFile).mockResolvedValue(mockContent);
+    vi.mocked(fs.promises.stat).mockResolvedValue({
+      mtime: new Date('2024-01-01'),
+      // ... other stat properties
+    } as fs.Stats);
+    
+    const config = await api.getConfiguration('app-config');
+    
+    expect(config.content).toBe(mockContent);
+    expect(config.lastModified).toEqual(new Date('2024-01-01'));
+  });
+});
+```
+
+### API Error Mocking
+```typescript
+describe('Error Handling', () => {
+  it('should handle network errors', async () => {
+    vi.mocked(rhdhLocalClient.getStatus).mockRejectedValue(
+      new Error('Network error')
+    );
+    
+    const { getByText } = render(RHDHLocal);
+    
+    await waitFor(() => {
+      expect(getByText(/Network error/)).toBeInTheDocument();
+    });
+  });
+  
+  it('should show user-friendly error messages', async () => {
+    vi.mocked(podmanDesktopApi.window.showErrorMessage).mockResolvedValue();
+    
+    vi.mocked(podmanDesktopApi.process.exec).mockRejectedValue(
+      new Error('ENOENT: command not found')
+    );
+    
+    await expect(api.start()).rejects.toThrow();
+    
+    expect(podmanDesktopApi.window.showErrorMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to start')
+    );
+  });
+});
+```
+
+## Integration Testing
+
+### End-to-End Workflow Testing
+```typescript
+describe('Complete User Workflow', () => {
+  it('should handle complete setup flow', async () => {
+    // 1. Check installation - not installed
+    vi.mocked(rhdhLocalClient.checkInstallation).mockResolvedValue({
+      installed: false,
+      gitAvailable: true,
+      podmanComposeAvailable: true,
+      issues: [],
+    });
+    
+    // 2. Clone repository
+    vi.mocked(rhdhLocalClient.cloneRepository).mockResolvedValue();
+    
+    // 3. Start services
+    vi.mocked(rhdhLocalClient.start).mockResolvedValue();
+    
+    // 4. Get running status
+    vi.mocked(rhdhLocalClient.getStatus).mockResolvedValue({
+      isInstalled: true,
+      isRunning: true,
+      services: { rhdh: { status: 'running' } },
+      url: 'http://localhost:7007',
+      lastUpdated: new Date(),
+    });
+    
+    const { getByRole, getByText } = render(RHDHLocal);
+    
+    // Clone
+    await waitFor(() => {
+      const cloneButton = getByRole('button', { name: /clone/i });
+      fireEvent.click(cloneButton);
+    });
+    
+    // Start
+    await waitFor(() => {
+      const startButton = getByRole('button', { name: /start/i });
+      fireEvent.click(startButton);
+    });
+    
+    // Verify running
+    await waitFor(() => {
+      expect(getByText(/running/i)).toBeInTheDocument();
+    });
+  });
+});
+```
+
+## Test Utilities
+
+### Custom Test Helpers
+```typescript
+// test/helpers.ts
+export function createMockStatus(overrides?: Partial<RHDHStatus>): RHDHStatus {
+  return {
+    isRunning: false,
+    isInstalled: true,
+    services: {},
+    repoPath: '/test/rhdh-local',
+    lastUpdated: new Date(),
+    ...overrides,
+  };
+}
+
+export function createMockContext(): podmanDesktopApi.ExtensionContext {
+  return {
+    storagePath: '/test/storage',
+    subscriptions: [],
+    extensionPath: '/test/extension',
+    extensionUri: { scheme: 'file', path: '/test/extension' },
+    globalState: {
+      get: vi.fn(),
+      update: vi.fn(),
+      setKeysForSync: vi.fn(),
+    },
+    workspaceState: {
+      get: vi.fn(),
+      update: vi.fn(),
+    },
+    extensionMode: 'test',
+  };
+}
+
+export async function waitForLoadingToFinish() {
+  await waitFor(() => {
+    expect(screen.queryByText('Loading...')).not.toBeInTheDocument();
+  });
+}
+```
 
 ## Coverage Requirements
-- Test all public API methods
-- Cover error handling paths
-- Test user interaction flows in components
-- Validate configuration parsing and validation logic
-- Test process execution error scenarios
 
-## Test Organization
-- Group related tests in describe blocks
-- Use descriptive test names that explain the expected behavior
-- Setup and teardown properly to avoid test interdependency
-- Use `beforeEach` and `afterEach` for common setup/cleanup
+### Target Coverage
+- **Overall**: 80% minimum
+- **API Layer**: 90% (critical path)
+- **Components**: 75% (UI logic)
+- **Utilities**: 100% (pure functions)
+
+### What to Test
+1. **All public API methods**
+2. **Error handling paths**
+3. **Edge cases** (empty data, malformed input)
+4. **User interactions** (clicks, input)
+5. **State transitions**
+6. **Async operations**
+7. **Configuration validation**
+8. **Service lifecycle**
+
+### What NOT to Test
+1. **Third-party libraries**
+2. **Podman Desktop API internals**
+3. **Pure UI styling**
+4. **Generated code**
+5. **Type definitions**
+
+## Best Practices
+
+1. **Isolate tests**: Each test should be independent
+2. **Use descriptive names**: Test names should explain what and why
+3. **Mock external dependencies**: Don't make real API calls
+4. **Test behavior, not implementation**: Focus on outcomes
+5. **Keep tests simple**: One assertion per test when possible
+6. **Use beforeEach/afterEach**: For setup and cleanup
+7. **Avoid hard-coded waits**: Use waitFor instead
+8. **Test error cases**: Don't just test happy paths
+9. **Use data builders**: Create test data consistently
+10. **Run tests in CI**: Ensure tests pass in clean environment

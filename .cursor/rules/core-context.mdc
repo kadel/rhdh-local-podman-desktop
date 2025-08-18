@@ -19,18 +19,39 @@ Podman Desktop is an Electron based application.
 ```
 monorepo/
 ├── packages/backend/     # Extension backend (Node.js/TypeScript)
+│   ├── src/
+│   │   ├── extension.ts        # Entry point, registers APIs
+│   │   ├── RHDHLocalApiImpl.ts # Main API implementation
+│   │   └── api-impl.ts         # API registration
+│   └── icon.png              # Extension icon
 ├── packages/frontend/    # UI (Svelte 5/TypeScript/TailwindCSS) 
+│   ├── src/
+│   │   ├── RHDHLocal.svelte    # Main UI component
+│   │   ├── App.svelte           # Application shell
+│   │   ├── api/client.ts        # API client
+│   │   └── lib/
+│   │       ├── SyntaxHighlightedEditor.svelte # Config editor
+│   │       └── Route.svelte     # Router component
+│   └── index.html
 ├── packages/shared/      # Shared APIs and types
-└── root package.json     # Workspace configuration
+│   ├── src/
+│   │   ├── RHDHLocalApi.ts     # API interface definition
+│   │   └── messages/
+│   │       └── MessageProxy.ts  # RPC message handling
+│   └── tsconfig.json
+├── __mocks__/           # Test mocks for Podman Desktop API
+├── types/               # TypeScript type definitions
+└── package.json         # Workspace configuration
 ```
 
 ## Core Technology Stack
 - **Backend**: TypeScript, Node.js, Podman Desktop API
-- **Frontend**: Svelte 5, TypeScript, TailwindCSS, @podman-desktop/ui-svelte
+- **Frontend**: Svelte 5 (with runes), TypeScript, TailwindCSS, @podman-desktop/ui-svelte
 - **Build**: Vite, Vitest for testing
 - **Communication**: RPC-based message passing via MessageProxy
-- **Process Execution**: `podmanDesktopApi.process.exec` for `docker-compose` commands
+- **Process Execution**: `podmanDesktopApi.process.exec` for git and docker-compose commands
 - **Storage**: `extensionContext.storagePath` for repository and configuration storage
+- **Configuration**: YAML parsing with js-yaml for RHDH configurations
 
 ## RHDH Local Workflow Understanding
 RHDH Local is a git repository containing:
@@ -63,70 +84,109 @@ export class RHDHLocalApiImpl implements RHDHLocalApi {
 }
 ```
 
-## API Design Patterns
+## Current API Implementation
 
-### RHDH Local API Definition
-Follow the HelloWorldApi pattern with comprehensive RHDH Local functionality:
+### RHDH Local API Definition (packages/shared/src/RHDHLocalApi.ts)
+The API is implemented as an abstract class with comprehensive RHDH Local functionality:
 
 ```typescript
-// packages/shared/src/RHDHLocalApi.ts
 export interface RHDHStatus {
   isRunning: boolean;
-  isInstalled: boolean; // Whether rhdh-local repo exists
-  services: {
-    rhdh: { status: 'running' | 'stopped' | 'error' };
-    'install-dynamic-plugins': { status: 'running' | 'stopped' | 'error' };
-  };
-  url?: string; // http://localhost:7007 when running
-  repoPath?: string; // Path to cloned rhdh-local repo
+  isInstalled: boolean;
+  services: { [serviceName: string]: RHDHServiceStatus };
+  url?: string;
+  repoPath?: string;
   lastUpdated: Date;
+  gitBranch?: string;
+  gitCommit?: string;
 }
+
+export interface RHDHServiceStatus {
+  status: 'running' | 'stopped' | 'not-used' | 'error' | 'unknown';
+  containerId?: string;
+  uptime?: string;
+}
+
+export type ConfigurationType = 'app-config' | 'dynamic-plugins' | 'env' | 'users' | 'components';
 
 export abstract class RHDHLocalApi {
   // Installation and setup
-  abstract checkInstallation(): Promise<{ installed: boolean; path?: string }>;
-  abstract cloneRepository(targetPath?: string): Promise<void>;
-  abstract updateRepository(): Promise<void>; // git pull
+  abstract checkInstallation(): Promise<InstallationCheck>;
+  abstract cloneRepository(): Promise<void>;
+  abstract updateRepository(): Promise<void>;
+  abstract setupConfigFiles(): Promise<void>;
   
   // Lifecycle management
   abstract getStatus(): Promise<RHDHStatus>;
-  abstract start(): Promise<void>; // docker-compose up -d
-  abstract stop(): Promise<void>; // docker-compose down  
-  abstract restart(): Promise<void>; // stop + start
+  abstract start(): Promise<void>;
+  abstract stop(): Promise<void>;
+  abstract restart(): Promise<void>;
+  abstract restartService(serviceName: string): Promise<void>;
   
   // Service management
-  abstract installPlugins(): Promise<void>; // run install-dynamic-plugins
+  abstract installPlugins(): Promise<void>;
   abstract getLogs(service: string, lines?: number): Promise<RHDHLogs>;
+  abstract getStreamingLogs(service: string, options?: LogStreamOptions): Promise<LogStreamResponse>;
   
-  // Configuration
-  abstract getConfiguration(configType: 'app-config' | 'dynamic-plugins' | 'env'): Promise<string>;
-  abstract updateConfiguration(configType: 'app-config' | 'dynamic-plugins' | 'env', config: string): Promise<void>;
+  // Repository management
+  abstract getGitStatus(): Promise<{ branch: string; commit: string; isDirty: boolean; unpulledCommits: number }>;
+  abstract pullLatest(): Promise<void>;
+  abstract resetToClean(): Promise<void>;
   
-  // Utilities  
+  // Configuration management
+  abstract getConfiguration(configType: ConfigurationType): Promise<ConfigurationFile>;
+  abstract updateConfiguration(configType: ConfigurationType, content: string): Promise<void>;
+  
+  // Utilities
   abstract openRHDHInBrowser(): Promise<void>;
+  abstract openExternalUrl(url: string): Promise<void>;
+  abstract openConfigInExternalEditor(configType: ConfigurationType): Promise<void>;
+  abstract getInstanceConfig(): Promise<InstanceConfig>;
 }
 ```
 
-### Implementation hints
-- use `extensionContext.storagePath` for storing rhdh-local repository clone and configuration
-- use `podmanDesktopApi.process.exec` for running `podman compose` and `git` commands
-- use `docker-compose` binary provided by Podman Desktop Compose extension
+### Implementation Details
+- **Storage**: Repository is cloned to `extensionContext.storagePath/rhdh-local` by default
+- **Compose Binary**: Uses `docker-compose` binary from Podman Desktop Compose extension at `../podman-desktop.compose/bin/docker-compose`
+- **Process Execution**: All commands use `podmanDesktopApi.process.exec` with proper cwd handling
+- **Service Discovery**: Dynamic service detection via `docker-compose ps -a --format json`
+- **Configuration Files**: Automatically copies example files on first setup with sensible defaults
 
 ### Error Handling Standards
 - Always provide user-friendly error messages via `podmanDesktopApi.window.showErrorMessage`
 - Show success messages via `podmanDesktopApi.window.showInformationMessage`
-- Log detailed errors for debugging with proper context
+- Log detailed errors for debugging with proper context using console.log with prefixes
 - Validate repository existence before operations
 - Handle async operations with proper try/catch blocks
-- Check for git and podman availability
+- Check for git and docker-compose availability during installation check
 - Provide meaningful error types that the UI can handle appropriately
+- Return structured error responses rather than throwing for recoverable errors
 
+## Key Implementation Patterns
 
-## Implementation Workflow
-1. Start with shared API definition (abstract class following HelloWorld pattern)
-2. Implement backend with repository management and proper error handling
-3. Use extensionContext.storagePath for default storage location
-4. Create comprehensive tests covering git operations and compose commands
-5. Add tray icon commands for starting, stopping and restarting rhdh-local
-6. Build reactive Svelte UI for editing config files with loading states and error handling
-7. Test complete user workflow from repository cloning to service management
+### Command Execution Pattern
+```typescript
+private async executeCommand(
+  command: string,
+  args: string[],
+  options?: { cwd?: string }
+): Promise<{ stdout: string; stderr: string }>
+```
+
+### Service Status Detection
+- Parse JSONL output from docker-compose ps
+- Map container states to service statuses
+- Support dynamic service discovery
+
+### Configuration Management
+- Support 5 configuration types: app-config, dynamic-plugins, env, users, components
+- Auto-create from examples with override content
+- Validate YAML syntax before saving
+- Track lastModified timestamps
+
+## Testing Approach
+1. Mock Podman Desktop API in `__mocks__` directory
+2. Test command execution and error handling
+3. Validate configuration file operations
+4. Test service lifecycle management
+5. Ensure proper cleanup and state management

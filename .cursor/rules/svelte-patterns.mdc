@@ -4,110 +4,434 @@ globs: ["**/*.svelte", "**/frontend/**"]
 alwaysApply: false
 ---
 
-# Svelte Component Patterns
+# Svelte 5 Component Patterns
 
-## Svelte 5 Reactive State for RHDH Local
-Use modern Svelte 5 reactive patterns for RHDH management:
+## State Management with Svelte 5 Runes
 
+### Basic State Declaration
 ```svelte
 <script lang="ts">
-// Reactive state declarations
-let status = $state<RHDHStatus | null>(null);
-let logs = $state<RHDHLogs | null>(null);
-let isLoading = $state(false);
-let selectedService = $state('rhdh');
+// Use $state for reactive variables (replaces let with reactivity)
+let status: RHDHStatus | null = null;  // Regular reactive state (Svelte 5 auto-reactive)
+let installationCheck: InstallationCheck | null = null;
+let loading = true;
+let error: string | null = null;
 
-// Derived values
-let isRunning = $derived(status?.isRunning ?? false);
-let statusColor = $derived(isRunning ? 'text-green-500' : 'text-red-500');
-
-// Event handlers
-async function loadStatus(): Promise<void>;
-function onMount(): () => void;
+// Complex state objects
+let actionLoading: { [key: string]: boolean } = {};
+let configFiles: { [key in ConfigurationType]?: ConfigurationFile } = {};
+let streamingLogs: { [serviceName: string]: boolean } = {};
 </script>
 ```
 
-## RHDH Setup Flow UI Pattern
-Handle repository cloning with user choice:
-
+### Lifecycle Management
 ```svelte
 <script lang="ts">
-// Setup state
-let useCustomPath = $state(false);
-let customPath = $state('');
+import { onMount, onDestroy } from 'svelte';
 
-// Setup actions
-async function cloneRepository(): Promise<void>;
+let refreshInterval: NodeJS.Timeout;
+
+onMount(() => {
+  loadStatus();
+  // Auto-refresh every 10 seconds
+  refreshInterval = setInterval(loadStatus, 10000);
+});
+
+onDestroy(() => {
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
+  }
+  // Clean up all streaming intervals
+  Object.values(streamingIntervals).forEach(interval => {
+    clearInterval(interval);
+  });
+});
 </script>
-
-<!-- UI Components: EmptyScreen, Button, Input, radio inputs -->
 ```
 
-## Service Management UI Pattern
-Use Podman Desktop UI components for service control:
+## API Integration Pattern
 
+### Loading Status with Error Handling
 ```svelte
 <script lang="ts">
-// Service management actions
-async function startRHDH(): Promise<void>;
-async function stopRHDH(): Promise<void>;
-async function restartRHDH(): Promise<void>;
-async function installPlugins(): Promise<void>;
-</script>
+import { rhdhLocalClient } from './api/client';
 
-<!-- UI Components: Card, Button with icons (faPlay, faStop, faRefresh, faDownload) -->
+async function loadStatus() {
+  try {
+    error = null;
+    const [statusResult, installCheck] = await Promise.all([
+      rhdhLocalClient.getStatus(),
+      rhdhLocalClient.checkInstallation()
+    ]);
+    
+    status = statusResult;
+    installationCheck = installCheck;
+    
+    // Set initial active tab if not set
+    if (status && status.services && Object.keys(status.services).length > 0 && !activeServiceTab) {
+      activeServiceTab = Object.keys(status.services)[0];
+    }
+
+    // Auto-load configurations if repository is installed
+    if (status?.isInstalled && !configsLoaded) {
+      await loadAllConfigurations();
+    }
+  } catch (e) {
+    console.error('Failed to load status:', e);
+    error = `Failed to load status: ${e.message}`;
+  } finally {
+    loading = false;
+  }
+}
+</script>
 ```
 
-## Configuration Management UI Pattern
-Handle RHDH configuration files:
-
+### Action with Loading State
 ```svelte
 <script lang="ts">
-// Configuration file types
-type ConfigType = 'app-config' | 'dynamic-plugins' | 'env';
-
-// Configuration actions
-function openConfigFile(configType: ConfigType): Promise<void>;
+async function handleStart() {
+  actionLoading['start'] = true;
+  try {
+    await rhdhLocalClient.start();
+    await loadStatus(); // Refresh status after action
+  } catch (e) {
+    console.error('Failed to start RHDH:', e);
+    error = `Failed to start: ${e.message}`;
+  } finally {
+    actionLoading['start'] = false;
+  }
+}
 </script>
-
-<!-- UI Components: Card, Button with faFileAlt icon -->
 ```
 
-## Service Status Display Pattern
-Show real-time service status with proper styling:
+## UI Component Patterns
 
+### Service Status Card
+```svelte
+{#if status?.services && Object.keys(status.services).length > 0}
+  <div class="bg-charcoal-800 rounded-lg p-4">
+    <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+      <Fa icon={faDatabase} />
+      Services
+    </h3>
+    
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+      {#each Object.entries(status.services) as [serviceName, service]}
+        <div class="bg-charcoal-700 rounded p-3">
+          <div class="flex items-center justify-between">
+            <span class="font-medium">{serviceName}</span>
+            <span class="text-xs px-2 py-1 rounded {
+              service.status === 'running' ? 'bg-green-500/20 text-green-400' :
+              service.status === 'error' ? 'bg-red-500/20 text-red-400' :
+              'bg-gray-500/20 text-gray-400'
+            }">
+              {service.status}
+            </span>
+          </div>
+        </div>
+      {/each}
+    </div>
+  </div>
+{/if}
+```
+
+### Configuration Editor with Save
 ```svelte
 <script lang="ts">
-// Service status actions
-async function loadLogs(serviceName: string): Promise<void>;
+import SyntaxHighlightedEditor from './lib/SyntaxHighlightedEditor.svelte';
+
+async function saveConfiguration(configType: ConfigurationType) {
+  const content = configContents[configType];
+  if (!content) return;
+  
+  configSaving[configType] = true;
+  try {
+    await rhdhLocalClient.updateConfiguration(configType, content);
+    // Reload to get updated metadata
+    const updated = await rhdhLocalClient.getConfiguration(configType);
+    configFiles[configType] = updated;
+    configContents[configType] = updated.content;
+  } catch (e) {
+    console.error(`Failed to save ${configType}:`, e);
+    error = `Failed to save configuration: ${e.message}`;
+  } finally {
+    configSaving[configType] = false;
+  }
+}
 </script>
 
-<!-- UI Components: Card, Button, grid layout with service status indicators -->
+<SyntaxHighlightedEditor 
+  bind:value={configContents[configType]} 
+  language="yaml"
+  class="h-[400px]"
+/>
+
+<Button 
+  on:click={() => saveConfiguration(configType)}
+  disabled={configSaving[configType]}
+  class="mt-2"
+>
+  <Fa icon={faSave} class="mr-2" />
+  {configSaving[configType] ? 'Saving...' : 'Save'}
+</Button>
 ```
 
-## Logs Display Pattern
-Show service logs with proper formatting:
-
+### Log Streaming Pattern
 ```svelte
-<!-- UI Components: Card with formatted log display (terminal-style) -->
+<script lang="ts">
+async function toggleLogStreaming(serviceName: string) {
+  if (streamingLogs[serviceName]) {
+    // Stop streaming
+    streamingLogs[serviceName] = false;
+    if (streamingIntervals[serviceName]) {
+      clearInterval(streamingIntervals[serviceName]);
+      delete streamingIntervals[serviceName];
+    }
+  } else {
+    // Start streaming
+    streamingLogs[serviceName] = true;
+    logLines[serviceName] = [];
+    
+    const fetchLogs = async () => {
+      try {
+        const response = await rhdhLocalClient.getStreamingLogs(serviceName, { 
+          tail: 50,
+          timestamps: true 
+        });
+        
+        if (response.logs) {
+          const newLines = response.logs.split('\n').filter(line => line.trim());
+          logLines[serviceName] = [...(logLines[serviceName] || []), ...newLines].slice(-500);
+        }
+      } catch (e) {
+        console.error(`Failed to fetch logs for ${serviceName}:`, e);
+      }
+    };
+    
+    await fetchLogs();
+    streamingIntervals[serviceName] = setInterval(fetchLogs, 2000);
+  }
+}
+</script>
 ```
 
-## Empty State Pattern
-Handle non-running states with clear actions:
+## Empty State Patterns
 
+### Not Installed State
 ```svelte
-<!-- UI Components: EmptyScreen, Button with faPlay icon -->
+{#if !status?.isInstalled}
+  <div class="flex flex-col items-center justify-center p-8 text-center">
+    <Fa icon={faDownload} class="text-4xl text-purple-400 mb-4" />
+    <h2 class="text-xl font-semibold mb-2">RHDH Local Not Installed</h2>
+    <p class="text-gray-400 mb-4">Clone the repository to get started</p>
+    <Button 
+      on:click={handleClone} 
+      disabled={actionLoading['clone']}
+    >
+      {actionLoading['clone'] ? 'Cloning...' : 'Clone Repository'}
+    </Button>
+  </div>
+{/if}
+```
+
+### Error State
+```svelte
+{#if error}
+  <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-4">
+    <div class="flex items-start gap-3">
+      <Fa icon={faExclamationCircle} class="text-red-400 mt-1" />
+      <div class="flex-1">
+        <h3 class="font-semibold text-red-400">Error</h3>
+        <p class="text-sm mt-1">{error}</p>
+      </div>
+    </div>
+  </div>
+{/if}
 ```
 
 ## Component Organization Standards
-- Use TypeScript in all script blocks: `<script lang="ts">`
-- Import types from shared package: `import type { RHDHStatus } from '/@shared/src/RHDHLocalApi'`
-- Use proper component cleanup in `onDestroy` for intervals/subscriptions
-- Leverage Podman Desktop's theming with CSS custom properties
-- Follow responsive design patterns with TailwindCSS
-- Use semantic HTML and proper accessibility attributes
-- Handle loading states consistently across all operations
-- Show clear error states and recovery actions
-- Provide informative empty states with actionable next steps
-- Use consistent icon usage from FontAwesome free-solid-svg-icons
-- Maintain proper component focus and single responsibility principle
+
+### Import Organization
+```svelte
+<script lang="ts">
+// 1. Svelte imports
+import { onMount, onDestroy } from 'svelte';
+
+// 2. Icon imports
+import { 
+  faPlay, faStop, faRotate, faExternalLinkAlt,
+  faDownload, faCheckCircle, faExclamationCircle
+} from '@fortawesome/free-solid-svg-icons';
+
+// 3. UI component imports
+import { Button } from '@podman-desktop/ui-svelte';
+import Fa from 'svelte-fa';
+
+// 4. Local component imports
+import SyntaxHighlightedEditor from './lib/SyntaxHighlightedEditor.svelte';
+
+// 5. API and type imports
+import { rhdhLocalClient } from './api/client';
+import type { RHDHStatus, ConfigurationType } from '/@shared/src/RHDHLocalApi';
+
+// 6. State and logic
+let status: RHDHStatus | null = null;
+// ... rest of the component
+</script>
+```
+
+### TailwindCSS with Podman Desktop Theme
+```svelte
+<!-- Use Podman Desktop color scheme -->
+<div class="bg-charcoal-800 rounded-lg p-4">
+  <div class="bg-charcoal-700 rounded p-3">
+    <!-- Content -->
+  </div>
+</div>
+
+<!-- Status indicators with semantic colors -->
+<span class="{
+  status === 'running' ? 'bg-green-500/20 text-green-400' :
+  status === 'error' ? 'bg-red-500/20 text-red-400' :
+  'bg-gray-500/20 text-gray-400'
+}">
+  {status}
+</span>
+
+<!-- Responsive grid layouts -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+  <!-- Grid items -->
+</div>
+```
+
+### Accessibility Patterns
+```svelte
+<!-- Proper button labeling -->
+<Button 
+  aria-label="Start RHDH Local"
+  disabled={actionLoading['start'] || status?.isRunning}
+  on:click={handleStart}
+>
+  <Fa icon={faPlay} />
+  <span class="sr-only">Start</span>
+</Button>
+
+<!-- Loading states with ARIA -->
+<div aria-live="polite" aria-busy={loading}>
+  {#if loading}
+    <span class="sr-only">Loading...</span>
+    <!-- Visual loading indicator -->
+  {/if}
+</div>
+
+<!-- Form inputs with labels -->
+<label for="config-editor" class="sr-only">Configuration Editor</label>
+<textarea 
+  id="config-editor"
+  bind:value={configContent}
+  aria-describedby="config-help"
+/>
+<span id="config-help" class="sr-only">Edit YAML configuration</span>
+```
+
+### Consistent Loading States
+```svelte
+<!-- Button loading pattern -->
+<Button 
+  disabled={actionLoading['start']}
+  on:click={handleStart}
+>
+  {#if actionLoading['start']}
+    <Fa icon={faSpinner} class="animate-spin mr-2" />
+    Starting...
+  {:else}
+    <Fa icon={faPlay} class="mr-2" />
+    Start
+  {/if}
+</Button>
+
+<!-- Section loading pattern -->
+{#if loading}
+  <div class="flex items-center justify-center p-8">
+    <Fa icon={faSpinner} class="animate-spin text-2xl text-purple-400" />
+    <span class="ml-3">Loading...</span>
+  </div>
+{:else}
+  <!-- Content -->
+{/if}
+```
+
+### Error Recovery Actions
+```svelte
+{#if error}
+  <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+    <div class="flex items-start gap-3">
+      <Fa icon={faExclamationCircle} class="text-red-400 mt-1" />
+      <div class="flex-1">
+        <h3 class="font-semibold text-red-400">Error</h3>
+        <p class="text-sm mt-1">{error}</p>
+        <div class="mt-3 flex gap-2">
+          <Button size="sm" on:click={retry}>
+            <Fa icon={faRotate} class="mr-1" />
+            Retry
+          </Button>
+          <Button size="sm" variant="secondary" on:click={() => error = null}>
+            Dismiss
+          </Button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+```
+
+## Best Practices
+
+### 1. Component Focus
+Each component should have a single, clear responsibility. Split large components into smaller, focused ones.
+
+### 2. Type Safety
+Always use TypeScript and properly type all props, state, and function parameters:
+```typescript
+let status: RHDHStatus | null = null;
+let configFiles: { [key in ConfigurationType]?: ConfigurationFile } = {};
+```
+
+### 3. Cleanup Resources
+Always clean up intervals, subscriptions, and event listeners:
+```typescript
+onDestroy(() => {
+  if (refreshInterval) clearInterval(refreshInterval);
+  Object.values(streamingIntervals).forEach(clearInterval);
+});
+```
+
+### 4. Error Boundaries
+Wrap async operations in try-catch blocks and provide user feedback:
+```typescript
+try {
+  await rhdhLocalClient.start();
+  await loadStatus();
+} catch (e) {
+  console.error('Failed to start:', e);
+  error = `Failed to start: ${e.message}`;
+}
+```
+
+### 5. Optimistic Updates
+Update UI optimistically when appropriate:
+```typescript
+async function toggleService(serviceName: string) {
+  // Optimistically update UI
+  const previousStatus = services[serviceName].status;
+  services[serviceName].status = 'restarting';
+  
+  try {
+    await rhdhLocalClient.restartService(serviceName);
+  } catch (e) {
+    // Revert on error
+    services[serviceName].status = previousStatus;
+    throw e;
+  }
+}
+```
